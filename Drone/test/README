@@ -1,0 +1,286 @@
+# Test Directory
+
+This directory is for unit tests and integration tests for the ESP32-S3 Drone project.
+
+## Purpose
+
+Unit testing helps ensure code reliability and catches bugs early in development. Tests should verify individual components and their interactions.
+
+## Testing Framework
+
+PlatformIO supports multiple testing frameworks:
+- **Unity** - Simple C unit testing (recommended for embedded)
+- **Google Test** - C++ testing framework
+- **Custom** - Roll your own test framework
+
+## Current Status
+
+No unit tests are currently implemented. This is an excellent area for contribution!
+
+## Recommended Test Structure
+
+```
+test/
+├── test_main.cpp           # Test runner
+├── test_gps/
+│   └── test_gps.cpp        # GPS parsing tests
+├── test_sensor/
+│   └── test_bmp280.cpp     # BMP280 sensor tests
+├── test_camera/
+│   └── test_camera.cpp     # Camera functionality tests
+└── test_network/
+    └── test_webserver.cpp  # Web server endpoint tests
+```
+
+## Writing Tests with Unity
+
+**Example test file: test/test_gps/test_gps.cpp**
+
+```cpp
+#include <unity.h>
+#include <TinyGPSPlus.h>
+
+TinyGPSPlus gps;
+
+void setUp(void) {
+    // Initialize before each test
+}
+
+void tearDown(void) {
+    // Cleanup after each test
+}
+
+void test_gps_parse_valid_nmea(void) {
+    // Test GPS parsing with valid NMEA sentence
+    const char* nmea = "$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47";
+    
+    for (int i = 0; nmea[i] != '\0'; i++) {
+        gps.encode(nmea[i]);
+    }
+    
+    TEST_ASSERT_TRUE(gps.location.isValid());
+    TEST_ASSERT_EQUAL_FLOAT(48.1173, gps.location.lat());
+}
+
+void test_gps_invalid_data(void) {
+    // Test GPS with invalid data
+    const char* invalid = "INVALID_DATA";
+    
+    for (int i = 0; invalid[i] != '\0'; i++) {
+        gps.encode(invalid[i]);
+    }
+    
+    TEST_ASSERT_FALSE(gps.location.isValid());
+}
+
+void setup() {
+    UNITY_BEGIN();
+    RUN_TEST(test_gps_parse_valid_nmea);
+    RUN_TEST(test_gps_invalid_data);
+    UNITY_END();
+}
+
+void loop() {
+    // Nothing to do here
+}
+```
+
+## Running Tests
+
+### Native Testing (on PC)
+
+For logic that doesn't require hardware:
+
+```bash
+pio test -e native
+```
+
+### Embedded Testing (on ESP32-S3)
+
+For tests that require actual hardware:
+
+```bash
+pio test -e esp32-s3-devkitc-1
+```
+
+### Running Specific Tests
+
+```bash
+pio test -e esp32-s3-devkitc-1 -f test_gps
+```
+
+## Test Coverage Areas
+
+### High Priority Tests
+
+1. **GPS Module**
+   - NMEA sentence parsing
+   - Coordinate validation
+   - Invalid data handling
+   - Baud rate configuration
+
+2. **BMP280 Sensor**
+   - I2C communication
+   - Temperature reading accuracy
+   - Pressure reading range
+   - Altitude calculation
+
+3. **Camera Module**
+   - Initialization success/failure
+   - Frame capture
+   - JPEG conversion
+   - Memory management
+
+4. **Web Server**
+   - Endpoint responses
+   - MJPEG streaming format
+   - Error handling
+   - Client disconnection
+
+### Medium Priority Tests
+
+1. **WiFi Module**
+   - AP mode initialization
+   - SSID/password validation
+   - Client connection handling
+
+2. **Memory Management**
+   - Heap usage tracking
+   - PSRAM allocation
+   - Memory leak detection
+
+3. **Error Handling**
+   - Sensor failure recovery
+   - Network error handling
+   - Invalid input handling
+
+## Integration Tests
+
+Test how components work together:
+
+```cpp
+void test_full_system_integration(void) {
+    // Initialize all components
+    bool gps_ok = initGPS();
+    bool sensor_ok = initBMP280();
+    bool camera_ok = initCamera();
+    bool wifi_ok = initWiFi();
+    
+    // Verify all initialized successfully
+    TEST_ASSERT_TRUE(gps_ok);
+    TEST_ASSERT_TRUE(sensor_ok);
+    TEST_ASSERT_TRUE(camera_ok);
+    TEST_ASSERT_TRUE(wifi_ok);
+    
+    // Test data flow
+    delay(5000); // Allow sensors to settle
+    
+    TEST_ASSERT_TRUE(gps.location.isValid());
+    TEST_ASSERT_GREATER_THAN(0, bmp.readTemperature());
+    
+    camera_fb_t *fb = esp_camera_fb_get();
+    TEST_ASSERT_NOT_NULL(fb);
+    esp_camera_fb_return(fb);
+}
+```
+
+## Mock Objects
+
+For testing without actual hardware, use mocks:
+
+```cpp
+class MockBMP280 {
+public:
+    float readTemperature() { return 25.0; }
+    float readPressure() { return 101325.0; }
+    float readAltitude(float seaLevel) { return 0.0; }
+};
+```
+
+## Continuous Integration
+
+Tests can be automated with GitHub Actions:
+
+**.github/workflows/tests.yml:**
+```yaml
+name: PlatformIO CI
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python
+      uses: actions/setup-python@v2
+    - name: Install PlatformIO
+      run: pip install platformio
+    - name: Run tests
+      run: pio test -e native
+```
+
+## Test Best Practices
+
+1. **Arrange-Act-Assert**: Structure tests clearly
+   ```cpp
+   void test_example(void) {
+       // Arrange - Set up test data
+       int input = 5;
+       
+       // Act - Execute function
+       int result = calculateValue(input);
+       
+       // Assert - Verify result
+       TEST_ASSERT_EQUAL(10, result);
+   }
+   ```
+
+2. **Test One Thing**: Each test should verify one behavior
+
+3. **Descriptive Names**: Use clear, descriptive test names
+   - Good: `test_camera_returns_null_on_init_failure`
+   - Bad: `test_camera_1`
+
+4. **Independent Tests**: Tests shouldn't depend on each other
+
+5. **Fast Execution**: Keep tests quick to encourage frequent running
+
+## Contributing Tests
+
+Adding tests is a great way to contribute! See [CONTRIBUTING.md](../CONTRIBUTING.md) for guidelines.
+
+Tests should:
+- Cover new features added to the codebase
+- Verify bug fixes don't regress
+- Improve overall code quality and confidence
+
+## Resources
+
+- [Unity Testing Framework](https://github.com/ThrowTheSwitch/Unity)
+- [PlatformIO Unit Testing](https://docs.platformio.org/en/latest/advanced/unit-testing/index.html)
+- [Embedded Testing Best Practices](https://interrupt.memfault.com/blog/unit-testing-basics)
+
+## Example Output
+
+Successful test run:
+```
+test/test_gps/test_gps.cpp:15:test_gps_parse_valid_nmea [PASSED]
+test/test_gps/test_gps.cpp:25:test_gps_invalid_data     [PASSED]
+
+-----------------------
+2 Tests 0 Failures 0 Ignored
+OK
+```
+
+## Future Testing Goals
+
+- [ ] Achieve 80%+ code coverage
+- [ ] Implement CI/CD pipeline
+- [ ] Add performance benchmarks
+- [ ] Create hardware-in-the-loop tests
+- [ ] Develop regression test suite
+
+For more information:
+https://docs.platformio.org/page/plus/unit-testing.html
+
