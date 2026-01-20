@@ -21,6 +21,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <driver/gpio.h>
+#include <ArduinoJson.h>
 
 /**
  * @brief Workaround for sensor_t type conflict
@@ -155,6 +156,8 @@ HardwareSerial gpsSerial(1);
  * Decodes GPS data including latitude, longitude, altitude, speed, etc.
  */
 TinyGPSPlus gps;
+
+bool readGPSLatLng(int* lat, int* lng);
 
 // ============================================================================
 // WEB SERVER REQUEST HANDLERS
@@ -358,6 +361,50 @@ void handleCapture() {
   
   free(jpg_buf); // Free allocated JPEG buffer
   Serial.println("Capture sent successfully");
+}
+
+/**
+ * @brief Handles HTTP requests to "/sensors" for GPS, Barometer, and IMU sensors
+ * 
+ * Reads from the GPS sensor for latitude and longitude data, while using the Barometer for altitude.
+ * Uses data from the IMU to describe orientation. Also includes a timestamp of when measurement occurred. 
+ * Returns all data in JSON format.
+ * 
+ * @note Returns HTTP 500 error if any Sensor fails
+ */
+void handleSensors() {
+  Serial.println("Start Sensors...");
+
+  JsonDocument doc;
+  doc["timestamp"] = millis();
+
+  // Get the position of the device
+  JsonObject position = doc["position"].to<JsonObject>();
+  int lat, lng;
+  bool gpsStatus = readGPSLatLng(&lat, &lng);
+  if (gpsStatus) {
+    position["latitude"] = lat;
+    position["longitude"] = lng;
+  } else {
+    Serial.println("GPS Sensor read failed");
+    server.send(500, "text/plain", "GPS Sensor failed to read");
+    return;
+  }
+  position["altitude"] = bmp.readAltitude();
+  
+  // TODO implement IMU
+  // Get the orientation of the device
+  JsonObject rotation = doc["rotation"].to<JsonObject>();
+  rotation["rx"] = 0;
+  rotation["ry"] = 0;
+  rotation["rz"] = 0;
+  
+  // TODO find fov for OV7670
+  doc["fov"] = 45;
+
+  String response;
+  serializeJson(doc, response);
+  server.send(200, "application/json", response);
 }
 
 /**
@@ -603,6 +650,7 @@ void setup() {
   server.on("/", handleRoot);
   server.on("/capture", handleCapture);
   server.on("/stream", handleStream);
+  server.on("/sensors", handleSensors);
   server.begin();
   Serial.println("HTTP server started");
 
@@ -681,6 +729,42 @@ void setup() {
 }
 
 /**
+ * @brief Reads from the GPS sensor the latitude and longitude
+ * 
+ * Returns the latitude and longitude into their respective function arguments
+ * 
+ * @note Also returns a boolean stating whether GPS read was successful
+ */
+bool readGPSLatLng(int* lat, int* lng) {
+  /**
+   * Read and parse GPS data from serial port
+   * TinyGPSPlus incrementally decodes NMEA sentences
+   * Characters are fed one at a time to the GPS parser
+   */
+  while (gpsSerial.available()) {
+    char c = gpsSerial.read();
+#if ECHO_RAW_NMEA
+    Serial.write(c); // Echo raw NMEA sentences if enabled
+#endif
+    gps.encode(c); // Feed character to GPS parser
+  }
+
+  /**
+   * Display GPS location when valid fix is obtained
+   * GPS must have clear view of sky and lock onto satellites
+   * Typically takes 30-60 seconds for first fix (cold start)
+   */
+  if (gps.location.isUpdated() && gps.location.isValid()) {
+    *lat = gps.location.lat();
+    *lng = gps.location.lng();
+
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * @brief Main program loop
  * 
  * Continuously performs the following tasks:
@@ -720,29 +804,20 @@ void loop() {
   // ========================================================================
   // GPS DATA PROCESSING
   // ========================================================================
-  /**
-   * Read and parse GPS data from serial port
-   * TinyGPSPlus incrementally decodes NMEA sentences
-   * Characters are fed one at a time to the GPS parser
-   */
-  while (gpsSerial.available()) {
-    char c = gpsSerial.read();
-#if ECHO_RAW_NMEA
-    Serial.write(c); // Echo raw NMEA sentences if enabled
-#endif
-    gps.encode(c); // Feed character to GPS parser
-  }
-
-  /**
-   * Display GPS location when valid fix is obtained
-   * GPS must have clear view of sky and lock onto satellites
-   * Typically takes 30-60 seconds for first fix (cold start)
-   */
-  if (gps.location.isUpdated() && gps.location.isValid()) {
-    Serial.print("Latitude: ");
-    Serial.println(gps.location.lat(), 6); // 6 decimal places
-    Serial.print("Longitude: ");
-    Serial.println(gps.location.lng(), 6);
+  static unsigned long lastGPSPrint = 0;
+  if (millis() - lastGPSPrint >= 2000) {
+    lastGPSPrint = millis();
+    
+    int lat, lng;
+    bool gpsStatus = readGPSLatLng(&lat, &lng);
+    if (gpsStatus) {
+      Serial.print("Latitude: ");
+      Serial.println(lat, 6); // 6 decimal places
+      Serial.print("Longitude: ");
+      Serial.println(lng, 6);
+    } else {
+      Serial.println("ERROR: GPS Read failed");
+    }
   }
 
   // ========================================================================
