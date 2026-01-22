@@ -110,6 +110,9 @@ WebServer server(80);
 #define HREF_GPIO_NUM    14    ///< Horizontal reference signal
 #define PCLK_GPIO_NUM    12    ///< Pixel clock input
 
+// OV7670 Camera FOV in degrees
+static const float FOV = 25;
+
 // ============================================================================
 // BMP280 BAROMETRIC SENSOR CONFIGURATION
 // ============================================================================
@@ -157,7 +160,7 @@ HardwareSerial gpsSerial(1);
  */
 TinyGPSPlus gps;
 
-bool readGPSLatLng(int* lat, int* lng);
+bool readGPSLatLngTime(double* lat, double* lng, uint32_t* time);
 
 // ============================================================================
 // WEB SERVER REQUEST HANDLERS
@@ -376,13 +379,15 @@ void handleSensors() {
   Serial.println("Start Sensors...");
 
   JsonDocument doc;
-  doc["timestamp"] = millis();
-
+  
   // Get the position of the device
   JsonObject position = doc["position"].to<JsonObject>();
-  int lat, lng;
-  bool gpsStatus = readGPSLatLng(&lat, &lng);
+  double lat, lng;
+  uint32_t time;
+
+  bool gpsStatus = readGPSLatLngTime(&lat, &lng, &time);
   if (gpsStatus) {
+    doc["timestamp"] = time;
     position["latitude"] = lat;
     position["longitude"] = lng;
   } else {
@@ -399,8 +404,7 @@ void handleSensors() {
   rotation["ry"] = 0;
   rotation["rz"] = 0;
   
-  // TODO find fov for OV7670
-  doc["fov"] = 45;
+  doc["fov"] = FOV;
 
   String response;
   serializeJson(doc, response);
@@ -729,13 +733,13 @@ void setup() {
 }
 
 /**
- * @brief Reads from the GPS sensor the latitude and longitude
+ * @brief Reads from the GPS sensor the latitude, longitude, and time
  * 
- * Returns the latitude and longitude into their respective function arguments
+ * Returns the latitude, longitude, and time into their respective function arguments
  * 
  * @note Also returns a boolean stating whether GPS read was successful
  */
-bool readGPSLatLng(int* lat, int* lng) {
+bool readGPSLatLngTime(double* lat, double* lng, uint32_t* time) {
   /**
    * Read and parse GPS data from serial port
    * TinyGPSPlus incrementally decodes NMEA sentences
@@ -755,6 +759,7 @@ bool readGPSLatLng(int* lat, int* lng) {
    * Typically takes 30-60 seconds for first fix (cold start)
    */
   if (gps.location.isUpdated() && gps.location.isValid()) {
+    *time = gps.time.value();
     *lat = gps.location.lat();
     *lng = gps.location.lng();
 
@@ -808,9 +813,12 @@ void loop() {
   if (millis() - lastGPSPrint >= 2000) {
     lastGPSPrint = millis();
     
-    int lat, lng;
-    bool gpsStatus = readGPSLatLng(&lat, &lng);
+    double lat, lng;
+    uint32_t time;
+    bool gpsStatus = readGPSLatLngTime(&lat, &lng, &time);
     if (gpsStatus) {
+      Serial.print("Time: ");
+      Serial.println(time);
       Serial.print("Latitude: ");
       Serial.println(lat, 6); // 6 decimal places
       Serial.print("Longitude: ");
