@@ -560,7 +560,7 @@ void setup() {
    * - QVGA (320x240) resolution for reasonable frame rate
    * - RGB565 is native format for OV7670 (no on-sensor compression)
    */
-  config.xclk_freq_hz = 12000000;           // Master clock: 12 MHz
+  config.xclk_freq_hz = 5000000;           // Master clock: 12 MHz
   config.frame_size = FRAMESIZE_QVGA;       // 320x240 resolution
   config.pixel_format = PIXFORMAT_RGB565;   // 16-bit RGB format
   config.grab_mode = CAMERA_GRAB_WHEN_EMPTY; // Wait for empty frame buffer
