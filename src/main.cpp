@@ -18,6 +18,8 @@
 #include <TinyGPSPlus.h>
 #include <Wire.h>
 #include <Adafruit_BMP280.h>
+#include <Adafruit_MPU6050.h>
+#include <Adafruit_Sensor.h>
 #include <WiFi.h>
 #include <WebServer.h>
 #include <driver/gpio.h>
@@ -134,6 +136,32 @@ static const int I2C_SDA_PIN = 8;  ///< I2C data line (Serial Data)
 static const int I2C_SCL_PIN = 9;  ///< I2C clock line (Serial Clock)
 
 // ============================================================================
+// MPU-6050 IMU SENSOR CONFIGURATION
+// ============================================================================
+/**
+ * @brief MPU-6050 sensor object for I2C communication
+ * 
+ * 6-axis motion tracking device combining a 3-axis gyroscope and 3-axis
+ * accelerometer. Shared I2C bus with BMP280 at address 0x68.
+ */
+Adafruit_MPU6050 mpu;
+
+/**
+ * @brief MPU-6050 data structure
+ * 
+ * Stores accelerometer, gyroscope, temperature readings, and calculated angles
+ */
+struct MPU6050Data {
+  float accelX, accelY, accelZ;  ///< Acceleration in m/s^2
+  float gyroX, gyroY, gyroZ;     ///< Angular velocity in rad/s
+  float temperature;              ///< IMU temperature in °C
+  float pitch;                    ///< Pitch angle in degrees (rotation around Y-axis)
+  float roll;                     ///< Roll angle in degrees (rotation around X-axis)
+};
+
+MPU6050Data mpuData;
+
+// ============================================================================
 // GPS MODULE CONFIGURATION
 // ============================================================================
 /**
@@ -161,6 +189,7 @@ HardwareSerial gpsSerial(1);
 TinyGPSPlus gps;
 
 bool readGPSLatLngTime(double* lat, double* lng, uint32_t* time);
+bool readMPU6050Data();
 
 // ============================================================================
 // WEB SERVER REQUEST HANDLERS
@@ -397,12 +426,30 @@ void handleSensors() {
   }
   position["altitude"] = bmp.readAltitude();
   
-  // TODO implement IMU
-  // Get the orientation of the device
+  // Get the IMU sensor data
+  bool mpuStatus = readMPU6050Data();
+  if (!mpuStatus) {
+    Serial.println("MPU-6050 Sensor read failed");
+    server.send(500, "text/plain", "MPU-6050 Sensor failed to read");
+    return;
+  }
+  
+  // Add accelerometer data
+  JsonObject acceleration = doc["acceleration"].to<JsonObject>();
+  acceleration["x"] = mpuData.accelX;
+  acceleration["y"] = mpuData.accelY;
+  acceleration["z"] = mpuData.accelZ;
+  
+  // Add gyroscope data (rotation rates)
   JsonObject rotation = doc["rotation"].to<JsonObject>();
-  rotation["rx"] = 0;
-  rotation["ry"] = 0;
-  rotation["rz"] = 0;
+  rotation["rx"] = mpuData.gyroX;
+  rotation["ry"] = mpuData.gyroY;
+  rotation["rz"] = mpuData.gyroZ;
+  
+  // Add orientation angles (pitch and roll from accelerometer)
+  JsonObject orientation = doc["orientation"].to<JsonObject>();
+  orientation["pitch"] = mpuData.pitch;
+  orientation["roll"] = mpuData.roll;
   
   doc["fov"] = FOV;
 
@@ -490,6 +537,55 @@ void setup() {
     status = bmp.begin(0x77); // Try alternate address
   }
   Serial.println("BMP280 init done.");
+
+  // ========================================================================
+  // MPU-6050 IMU SENSOR INITIALIZATION
+  // ========================================================================
+  /**
+   * Initialize MPU-6050 accelerometer/gyroscope
+   * Default I2C address is 0x68 (with AD0 pin to GND)
+   */
+  Serial.println("Initializing MPU-6050...");
+  if (!mpu.begin()) {
+    Serial.println("Failed to find MPU6050 chip!");
+  } else {
+    Serial.println("MPU-6050 found!");
+    
+    /**
+     * Configure MPU-6050 sensor ranges
+     * These settings determine the sensitivity and maximum measurement range
+     */
+    mpu.setAccelerometerRange(MPU6050_RANGE_8_G);    // ±8g range
+    Serial.print("Accelerometer range set to: ");
+    switch (mpu.getAccelerometerRange()) {
+      case MPU6050_RANGE_2_G:  Serial.println("+-2G"); break;
+      case MPU6050_RANGE_4_G:  Serial.println("+-4G"); break;
+      case MPU6050_RANGE_8_G:  Serial.println("+-8G"); break;
+      case MPU6050_RANGE_16_G: Serial.println("+-16G"); break;
+    }
+    
+    mpu.setGyroRange(MPU6050_RANGE_500_DEG);         // ±500 deg/s range
+    Serial.print("Gyro range set to: ");
+    switch (mpu.getGyroRange()) {
+      case MPU6050_RANGE_250_DEG:  Serial.println("+- 250 deg/s"); break;
+      case MPU6050_RANGE_500_DEG:  Serial.println("+- 500 deg/s"); break;
+      case MPU6050_RANGE_1000_DEG: Serial.println("+- 1000 deg/s"); break;
+      case MPU6050_RANGE_2000_DEG: Serial.println("+- 2000 deg/s"); break;
+    }
+    
+    mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);      // 21 Hz low-pass filter
+    Serial.print("Filter bandwidth set to: ");
+    switch (mpu.getFilterBandwidth()) {
+      case MPU6050_BAND_260_HZ: Serial.println("260 Hz"); break;
+      case MPU6050_BAND_184_HZ: Serial.println("184 Hz"); break;
+      case MPU6050_BAND_94_HZ:  Serial.println("94 Hz"); break;
+      case MPU6050_BAND_44_HZ:  Serial.println("44 Hz"); break;
+      case MPU6050_BAND_21_HZ:  Serial.println("21 Hz"); break;
+      case MPU6050_BAND_10_HZ:  Serial.println("10 Hz"); break;
+      case MPU6050_BAND_5_HZ:   Serial.println("5 Hz"); break;
+    }
+    Serial.println("MPU-6050 initialization complete!");
+  }
   
   // ========================================================================
   // CAMERA PRE-INITIALIZATION AND I2C TEST
@@ -770,6 +866,56 @@ bool readGPSLatLngTime(double* lat, double* lng, uint32_t* time) {
 }
 
 /**
+ * @brief Reads accelerometer and gyroscope data from MPU-6050
+ * 
+ * Updates the global mpuData structure with current sensor readings.
+ * Also calculates pitch and roll angles from accelerometer data.
+ * 
+ * @note Angle calculation assumes near-stationary conditions.
+ *       During high acceleration/movement, angles will be less accurate.
+ * 
+ * @return true if read was successful, false otherwise
+ */
+bool readMPU6050Data() {
+  sensors_event_t a, g, temp;
+  
+  if (!mpu.getEvent(&a, &g, &temp)) {
+    return false;
+  }
+  
+  // Store accelerometer data (m/s^2)
+  mpuData.accelX = a.acceleration.x;
+  mpuData.accelY = a.acceleration.y;
+  mpuData.accelZ = a.acceleration.z;
+  
+  // Store gyroscope data (rad/s)
+  mpuData.gyroX = g.gyro.x;
+  mpuData.gyroY = g.gyro.y;
+  mpuData.gyroZ = g.gyro.z;
+  
+  // Store temperature (°C)
+  mpuData.temperature = temp.temperature;
+  
+  /**
+   * Calculate tilt angles from accelerometer
+   * These formulas extract pitch and roll from gravity vector
+   * 
+   * Pitch: Rotation around Y-axis (forward/backward tilt)
+   * Roll:  Rotation around X-axis (left/right tilt)
+   * 
+   * Note: Yaw (rotation around Z-axis) cannot be determined from
+   *       accelerometer alone - would require magnetometer
+   */
+  mpuData.pitch = atan2(mpuData.accelY, 
+                        sqrt(mpuData.accelX * mpuData.accelX + 
+                             mpuData.accelZ * mpuData.accelZ)) * 180.0 / PI;
+  
+  mpuData.roll = atan2(-mpuData.accelX, mpuData.accelZ) * 180.0 / PI;
+  
+  return true;
+}
+
+/**
  * @brief Main program loop
  * 
  * Continuously performs the following tasks:
@@ -862,5 +1008,38 @@ void loop() {
     Serial.println(" m");
     
     Serial.println(); // Blank line for readability
+  }
+
+  // ========================================================================
+  // MPU-6050 IMU SENSOR DATA LOGGING
+  // ========================================================================
+  /**
+   * Read and display IMU sensor data periodically
+   * Updates every 2 seconds alongside other sensor data
+   * 
+   * Measurements include:
+   * - 3-axis acceleration in m/s^2
+   * - 3-axis angular velocity in rad/s
+   * - IMU temperature in degrees Celsius
+   */
+  static unsigned long lastMpuPrint = 0;
+  if (millis() - lastMpuPrint >= 2000) {
+    lastMpuPrint = millis();
+    
+    if (readMPU6050Data()) {
+      Serial.println("--- MPU-6050 IMU Data ---");
+      Serial.print("Acceleration X: "); Serial.print(mpuData.accelX); Serial.println(" m/s^2");
+      Serial.print("Pitch: "); Serial.print(mpuData.pitch); Serial.println(" degrees");
+      Serial.print("Roll: "); Serial.print(mpuData.roll); Serial.println(" degrees");
+      Serial.print("Acceleration Y: "); Serial.print(mpuData.accelY); Serial.println(" m/s^2");
+      Serial.print("Acceleration Z: "); Serial.print(mpuData.accelZ); Serial.println(" m/s^2");
+      Serial.print("Rotation X: "); Serial.print(mpuData.gyroX); Serial.println(" rad/s");
+      Serial.print("Rotation Y: "); Serial.print(mpuData.gyroY); Serial.println(" rad/s");
+      Serial.print("Rotation Z: "); Serial.print(mpuData.gyroZ); Serial.println(" rad/s");
+      Serial.print("Temperature: "); Serial.print(mpuData.temperature); Serial.println(" °C");
+      Serial.println();
+    } else {
+      Serial.println("MPU-6050 read failed!");
+    }
   }
 }
