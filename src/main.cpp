@@ -176,9 +176,13 @@ struct MPU6050Data {
   float temperature;              ///< IMU temperature in °C
   float pitch;                    ///< Pitch angle in degrees (rotation around Y-axis)
   float roll;                     ///< Roll angle in degrees (rotation around X-axis)
+  float yaw;                      ///< Yaw angle in degrees (rotation around Z-axis)
 };
 
 MPU6050Data mpuData;
+
+float gyroZError = 0;
+
 
 // ============================================================================
 // GPS MODULE CONFIGURATION
@@ -604,6 +608,8 @@ void setup() {
       case MPU6050_BAND_5_HZ:   Serial.println("5 Hz"); break;
     }
     Serial.println("MPU-6050 initialization complete!");
+
+    calibrateMPU6050();
   }
   
   // ========================================================================
@@ -953,7 +959,7 @@ bool readMPU6050Data() {
    * Pitch: Rotation around Y-axis (forward/backward tilt)
    * Roll:  Rotation around X-axis (left/right tilt)
    * 
-   * Note: Yaw (rotation around Z-axis) cannot be determined from
+   * Note: Yaw (rotation around Z-axis) cannot be determined accurately from
    *       accelerometer alone - would require magnetometer
    */
   mpuData.pitch = atan2(mpuData.accelY, 
@@ -961,8 +967,64 @@ bool readMPU6050Data() {
                              mpuData.accelZ * mpuData.accelZ)) * 180.0 / PI;
   
   mpuData.roll = atan2(-mpuData.accelX, mpuData.accelZ) * 180.0 / PI;
+
+  /**
+   * Yaw Calculation with Integration
+   * 
+   * @note Will cause drift over time compared to using a 9DOF IMU (accelerometer + gyroscope + magnetometer)
+   */
+  static unsigned long lastTime = 0;
+  unsigned long currentTime = millis();
+  
+  if (lastTime > 0) {
+    // Calculate time elapsed in seconds
+    float deltaTime = (currentTime - lastTime) / 1000.0f;
+
+    // Correct the gyro scope reading
+    float correctedGyroZ = mpuData.gyroZ - gyroZError;
+
+    // Ignore small noise
+    if (abs(correctedGyroZ) < 0.01) correctedGyroZ = 0;
+    
+    // Convert Z-axis rad/s to degrees/s, then multiply by time to get degrees moved
+    float yawChange = (mpuData.gyroZ * 180.0 / PI) * deltaTime;
+    
+    // Add the change to the running total
+    mpuData.yaw += yawChange;
+    
+    // Keep yaw bounded between -180 and 180 degrees
+    if (mpuData.yaw > 180.0f) mpuData.yaw -= 360.0f;
+    if (mpuData.yaw < -180.0f) mpuData.yaw += 360.0f;
+  }
+  
+  lastTime = currentTime;
   
   return true;
+}
+
+/**
+ * @brief Calibrates the MPU6050 on the Z-Axis
+ * 
+ * @note Calibration assumes device is stationary. 
+ * Also assumes device is connected properly.
+ */
+void calibrateMPU6050() {
+  Serial.println("Calibrating MPU6050... Keep device stationary");
+
+  const int numSamples = 500;
+  float gyroZSum = 0;
+  sensors_event_t a, g, temp;
+
+  for (int i = 0; i < numSamples; i++) {
+    mpu.getEvent(&a, &g, &temp);
+    gyroZSum += g.gyro.z;
+    delay(5); // Small delay to get fresh samples
+  }
+
+  gyroZError = gyroZSum / numSamples;
+
+  Serial.print("Calibration complete. Gyro Z Bias (rad/s): ");
+  Serial.println(gyroZError, 6);
 }
 
 /**
@@ -1081,6 +1143,7 @@ void loop() {
       Serial.print("Acceleration X: "); Serial.print(mpuData.accelX); Serial.println(" m/s^2");
       Serial.print("Pitch: "); Serial.print(mpuData.pitch); Serial.println(" degrees");
       Serial.print("Roll: "); Serial.print(mpuData.roll); Serial.println(" degrees");
+      Serial.print("Yaw: "); Serial.print(mpuData.yaw); Serial.println(" degrees");
       Serial.print("Acceleration Y: "); Serial.print(mpuData.accelY); Serial.println(" m/s^2");
       Serial.print("Acceleration Z: "); Serial.print(mpuData.accelZ); Serial.println(" m/s^2");
       Serial.print("Rotation X: "); Serial.print(mpuData.gyroX); Serial.println(" rad/s");
