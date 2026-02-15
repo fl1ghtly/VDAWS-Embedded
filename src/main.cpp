@@ -78,9 +78,10 @@ const char* sta_password = WIFI_PASS;      ///< WiFi password (minimum 8 charact
 /**
  * @brief Husarnet Credentials
  * 
+ * The ESP32-S3 joins a Husarnet Network with the join code and device name HOSTNAME
  * 
  */
-const char* HOSTNAME = "esp32-cam1";
+const char* HOSTNAME = HUSAR_HOSTNAME;
 const char* JOIN_CODE = HUSAR_JOIN_CODE;
 
 HusarnetClient husarnet;
@@ -144,6 +145,8 @@ static const float FOV = 25;
  * calculate altitude. Typical I2C addresses: 0x76 or 0x77.
  */
 Adafruit_BMP280 bmp;
+// Default sea level pressure
+float seaLevelhPA = 1013.25;
 
 /**
  * @brief I2C pin assignments for BMP280 sensor
@@ -183,6 +186,13 @@ MPU6050Data mpuData;
 
 float gyroZError = 0;
 
+// Hardcoded values for orientation. Can be changed under /calibrate endpoint
+bool useHardcodedOrientation = false;
+// Extra flag for yaw because yaw is more inaccurate compared to Pitch and Roll
+bool useHardcodeYaw = false;
+float hardcodePitch = 0;
+float hardcodeYaw = 0;
+float hardcodeRoll = 0;
 
 // ============================================================================
 // GPS MODULE CONFIGURATION
@@ -196,6 +206,11 @@ float gyroZError = 0;
 static const int GPS_RX_PIN = 16;      ///< ESP32 RX (connects to GPS TX)
 static const int GPS_TX_PIN = 17;      ///< ESP32 TX (connects to GPS RX, rarely used)
 static const uint32_t GPS_BAUD = 9600; ///< GPS serial baud rate
+
+// Hard coded values to use for position if required. Can be changed under the /calibrate endpoint
+bool useHardcodedPosition = false;
+double hardcodeLatitude = 0;
+double hardcodeLongitude = 0;
 
 /**
  * @brief Hardware serial port for GPS communication
@@ -213,6 +228,7 @@ TinyGPSPlus gps;
 
 bool readGPSLatLngTime(double* lat, double* lng, uint32_t* time);
 bool readMPU6050Data();
+void calibrateMPU6050();
 
 // ============================================================================
 // WEB SERVER REQUEST HANDLERS
@@ -438,16 +454,21 @@ void handleSensors() {
   uint32_t time;
 
   bool gpsStatus = readGPSLatLngTime(&lat, &lng, &time);
-  if (gpsStatus) {
+  if (gpsStatus && !useHardcodedPosition) {
     doc["timestamp"] = time;
     position["latitude"] = lat;
     position["longitude"] = lng;
+  } else if (useHardcodedPosition) {
+    doc["timestamp"] = millis();
+    position["latitude"] = hardcodeLatitude;
+    position["longitude"] = hardcodeLongitude;
   } else {
     Serial.println("GPS Sensor read failed");
     server.send(500, "text/plain", "GPS Sensor failed to read");
     return;
   }
-  position["altitude"] = bmp.readAltitude();
+
+  position["altitude"] = bmp.readAltitude(seaLevelhPA);
   
   // Get the IMU sensor data
   bool mpuStatus = readMPU6050Data();
@@ -458,27 +479,106 @@ void handleSensors() {
   }
   
   // Add accelerometer data
-  JsonObject acceleration = doc["acceleration"].to<JsonObject>();
-  acceleration["x"] = mpuData.accelX;
-  acceleration["y"] = mpuData.accelY;
-  acceleration["z"] = mpuData.accelZ;
+  // JsonObject acceleration = doc["acceleration"].to<JsonObject>();
+  // acceleration["ax"] = mpuData.accelX;
+  // acceleration["ay"] = mpuData.accelY;
+  // acceleration["az"] = mpuData.accelZ;
   
   // Add gyroscope data (rotation rates)
-  JsonObject rotation = doc["rotation"].to<JsonObject>();
-  rotation["rx"] = mpuData.gyroX;
-  rotation["ry"] = mpuData.gyroY;
-  rotation["rz"] = mpuData.gyroZ;
+  // JsonObject rotation = doc["rotation"].to<JsonObject>();
+  // rotation["rx"] = mpuData.gyroX;
+  // rotation["ry"] = mpuData.gyroY;
+  // rotation["rz"] = mpuData.gyroZ;
   
-  // Add orientation angles (pitch and roll from accelerometer)
+  // Add orientation angles (pitch and roll from accelerometerm, yaw from integration)
   JsonObject orientation = doc["orientation"].to<JsonObject>();
-  orientation["pitch"] = mpuData.pitch;
-  orientation["roll"] = mpuData.roll;
+
+  if (useHardcodedOrientation) {
+    orientation["pitch"] = hardcodePitch;
+    orientation["roll"] = hardcodeRoll;
+    orientation["yaw"] = hardcodeYaw;
+  } else if (useHardcodeYaw) {
+    orientation["pitch"] = mpuData.pitch;
+    orientation["roll"] = mpuData.roll;
+    orientation["yaw"] = hardcodeYaw;
+  } else {
+    orientation["pitch"] = mpuData.pitch;
+    orientation["roll"] = mpuData.roll;
+    orientation["yaw"] = mpuData.yaw;
+  }
   
   doc["fov"] = FOV;
 
   String response;
   serializeJson(doc, response);
   server.send(200, "application/json", response);
+}
+
+/**
+ * @brief Handles HTTP POST requests to "/calibrate" to calibrate coordinates, altitude, and orientation
+ * 
+ * 
+ */
+void handleCalibrate() {
+  Serial.println("Calibrating device...");
+
+  if (!server.hasArg("plain")) {
+    Serial.println("Calibration failed: No payload received");
+    server.send(400, "application/json", "{\"error\":\"Bad Request: No payload provided\"}");
+    return;
+  }
+
+  String body = server.arg("plain");
+  Serial.println("Received payload: " + body);
+
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, body);
+
+  if (err) {
+    Serial.print("JSON Deserialization failed: ");
+    Serial.println(err.c_str());
+    server.send(400, "application/json", "{\"error\":\"Invalid JSON format\"}");
+    return;
+  }
+
+  // Change sea level pressure if data exists, otherwise leave as is
+  seaLevelhPA = doc["seaLevelhPA"] | seaLevelhPA;
+
+  // Change position
+  hardcodeLatitude = doc["latitude"] | hardcodeLatitude;
+  hardcodeLongitude = doc["longitude"] | hardcodeLongitude;
+  useHardcodedPosition = doc["useHardcodedPosition"] | useHardcodedPosition;
+
+  // Change orientation
+  hardcodePitch = doc["pitch"] | hardcodePitch;
+  hardcodeRoll = doc["roll"] | hardcodeRoll;
+  hardcodeYaw = doc["yaw"] | hardcodeYaw;
+  useHardcodedOrientation = doc["useHardcodedOrientation"] | useHardcodedOrientation;
+  useHardcodeYaw = doc["useHardcodeYaw"] | useHardcodeYaw;
+  
+  Serial.println("New Calibration values:");
+  Serial.print("Sea Level hPA: ");
+  Serial.println(seaLevelhPA);
+
+  Serial.print("Hardcoded Latitude: ");
+  Serial.println(hardcodeLatitude, 6);
+  Serial.print("Hardcoded Longitude: ");
+  Serial.println(hardcodeLongitude, 6);
+  Serial.print("Use Hardcoded Position: ");
+  Serial.println(useHardcodedPosition ? "true" : "false");
+  
+  Serial.print("Hardcoded Pitch: ");
+  Serial.println(hardcodePitch);
+  Serial.print("Hardcoded Roll: ");
+  Serial.println(hardcodeRoll);
+  Serial.print("Hardcoded Yaw: ");
+  Serial.println(hardcodeYaw);
+  Serial.print("Use Hardcoded Orientation: ");
+  Serial.println(useHardcodedOrientation ? "true" : "false");
+  Serial.print("Use Hardcoded Yaw: ");
+  Serial.println(useHardcodeYaw ? "true" : "false");
+
+  server.send(200, "application/json", "{\"status\":\"success\", \"message\":\"Device calibrated successfully\"}");
 }
 
 /**
@@ -807,6 +907,7 @@ void setup() {
   server.on("/capture", handleCapture);
   server.on("/stream", handleStream);
   server.on("/sensors", handleSensors);
+  server.on("/calibrate", HTTP_POST, handleCalibrate);
   server.begin();
   Serial.println("HTTP server started");
 
