@@ -24,6 +24,7 @@
 #include <WebServer.h>
 #include <driver/gpio.h>
 #include <ArduinoJson.h>
+#include <husarnet.h>
 
 /**
  * @brief Workaround for sensor_t type conflict
@@ -58,13 +59,31 @@ volatile unsigned long last_vsync_time = 0;  ///< Timestamp of last VSYNC edge
 // WIFI CONFIGURATION
 // ============================================================================
 /**
- * @brief WiFi Access Point credentials
+ * @brief WiFi Station and Acess Point credentials
  * 
- * The ESP32-S3 creates its own WiFi network for client connections.
+ * The ESP32-S3 creates its own WiFi network for local connections.
  * Connect to this network to access the web interface and camera stream.
+ * 
+ * The ESP32-S3 also connects to a wifi network to send data over the internet.
  */
-const char* ssid = "Drone-Cam-v2";      ///< WiFi network name (SSID)
-const char* password = "12345678";      ///< WiFi password (minimum 8 characters)
+const char* ap_ssid = "Drone-Cam-v2";      ///< Access point network name (SSID)
+const char* ap_password = "12345678";      ///< Access point password (minimum 8 characters)
+
+const char* sta_ssid = WIFI_SSID;      ///< WiFi network name (SSID)
+const char* sta_password = WIFI_PASS;      ///< WiFi password (minimum 8 characters)
+
+// ============================================================================
+// HUSARNET CONFIGURATION
+// ============================================================================
+/**
+ * @brief Husarnet Credentials
+ * 
+ * 
+ */
+const char* HOSTNAME = "esp32-cam1";
+const char* JOIN_CODE = HUSAR_JOIN_CODE;
+
+HusarnetClient husarnet;
 
 /**
  * @brief Web server instance
@@ -596,9 +615,8 @@ void setup() {
    */
   Serial.println("Pre-enabling XCLK on GPIO 11...");
   pinMode(XCLK_GPIO_NUM, OUTPUT);
-  ledcSetup(7, 20000000, 1); // 20 MHz XCLK using LEDC channel 7
-  ledcAttachPin(XCLK_GPIO_NUM, 7);
-  ledcWrite(7, 1); // 50% duty cycle
+  ledcAttach(XCLK_GPIO_NUM, 20000000, 1);
+  ledcWrite(XCLK_GPIO_NUM, 1); // 50% duty cycle
   delay(500); // Allow clock to stabilize
   
   /**
@@ -614,7 +632,7 @@ void setup() {
   Wire1.end();
   
   // Release manual LEDC control before camera driver takes over
-  ledcDetachPin(XCLK_GPIO_NUM);
+  ledcDetach(XCLK_GPIO_NUM);
   Serial.println("Handing over to camera driver...");
 
   // ========================================================================
@@ -728,14 +746,46 @@ void setup() {
   // ========================================================================
   // WIFI ACCESS POINT INITIALIZATION
   // ========================================================================
+  WiFi.mode(WIFI_AP_STA); // Set to Dual mode (STA + AP)
+
   /**
    * Configure ESP32-S3 as WiFi Access Point
    * This creates a standalone network that clients can connect to
    */
-  WiFi.mode(WIFI_AP); // Set to Access Point mode (not Station mode)
-  WiFi.softAP(ssid, password);
+  WiFi.softAP(ap_ssid, ap_password);
   Serial.print("AP Started. IP: ");
   Serial.println(WiFi.softAPIP()); // Typically 192.168.4.1
+
+  // Connect ESP32-S3 to WiFi Network
+  Serial.print("Connecting to WiFi: ");
+  Serial.println(sta_ssid);
+  WiFi.begin(sta_ssid, sta_password);
+  
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  
+  Serial.println("Successfully connected to WiFi");
+  Serial.print("STA IP: ");
+  Serial.println(WiFi.localIP());
+  
+  // ========================================================================
+  // HUSARNET INITIALIZATION
+  // ========================================================================
+  /**
+   * Join the Husarnet network
+   */
+  husarnet.join(HOSTNAME, JOIN_CODE);
+
+  while (!husarnet.isJoined()) {
+    Serial.println("Waiting for Husarnet network");
+    delay(1000);
+  }
+  Serial.println("Husarnet network joined");
+
+  Serial.print("Husarnet IP: ");
+  Serial.println(husarnet.getIpAddress().c_str());
 
   // ========================================================================
   // WEB SERVER INITIALIZATION
