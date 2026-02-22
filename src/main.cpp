@@ -1088,7 +1088,7 @@ bool readMPU6050Data() {
     if (abs(correctedGyroZ) < 0.01) correctedGyroZ = 0;
     
     // Convert Z-axis rad/s to degrees/s, then multiply by time to get degrees moved
-    float yawChange = (mpuData.gyroZ * 180.0 / PI) * deltaTime;
+    float yawChange = (correctedGyroZ * 180.0 / PI) * deltaTime;
     
     // Add the change to the running total
     mpuData.yaw += yawChange;
