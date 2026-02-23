@@ -357,8 +357,140 @@ void handleRoot() {
   String html = "<html><body><h1>ESP32 Drone Camera</h1>";
   html += "<p><a href='/capture'>Capture Image</a></p>";
   html += "<p><a href='/stream'>Live Stream</a></p>";
+  html += "<p><a href='/sensors'>Sensor Data</a></p>";
+  html += "<p><a href='/calibrate'>Calibration Settings</a></p>";
   html += "<p><img src='/stream' style='width:100%; max-width:640px;'></p>";
   html += "</body></html>";
+  server.send(200, "text/html", html);
+}
+
+/**
+ * @brief Handles HTTP GET requests to "/calibrate"
+ * Serves the HTML form for configuring sensor offsets and hardcoded values.
+ */
+void handleCalibrationPage() {
+  String html = R"rawliteral(
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Drone Calibration</title>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f9f9f9; }
+        .container { max-width: 600px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h1, h2, h3 { color: #333; }
+        a { text-decoration: none; color: #0066cc; font-weight: bold; }
+        form { background: #f4f4f4; padding: 15px; border-radius: 5px; margin-top: 20px; }
+        .form-group { margin-bottom: 12px; display: flex; align-items: center; }
+        label { display: inline-block; width: 220px; font-weight: bold; font-size: 14px; }
+        input[type="number"] { width: 150px; padding: 5px; border: 1px solid #ccc; border-radius: 3px; }
+        button { background: #0066cc; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; font-size: 14px; margin-top: 10px; }
+        button:hover { background: #0052a3; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <a href="/">&larr; Back to Home</a>
+        <h1>Calibration Settings</h1>
+        
+        <form id="calForm" onsubmit="submitCalibration(event)">
+          <div class="form-group">
+            <label>Sea Level hPA:</label>
+            <input type="number" step="any" id="seaLevelhPA" placeholder="e.g. 1013.25">
+          </div>
+          
+          <h3>Position</h3>
+          <div class="form-group">
+            <label>Use Hardcoded Position:</label>
+            <input type="checkbox" id="useHardcodedPosition">
+          </div>
+          <div class="form-group">
+            <label>Latitude:</label>
+            <input type="number" step="any" id="latitude">
+          </div>
+          <div class="form-group">
+            <label>Longitude:</label>
+            <input type="number" step="any" id="longitude">
+          </div>
+          
+          <h3>Orientation</h3>
+          <div class="form-group">
+            <label>Use Hardcoded Orientation:</label>
+            <input type="checkbox" id="useHardcodedOrientation">
+          </div>
+          <div class="form-group">
+            <label>Use Hardcoded Yaw:</label>
+            <input type="checkbox" id="useHardcodeYaw">
+          </div>
+          <div class="form-group">
+            <label>Pitch:</label>
+            <input type="number" step="any" id="pitch">
+          </div>
+          <div class="form-group">
+            <label>Roll:</label>
+            <input type="number" step="any" id="roll">
+          </div>
+          <div class="form-group">
+            <label>Yaw:</label>
+            <input type="number" step="any" id="yaw">
+          </div>
+          
+          <button type="submit">Send Calibration</button>
+        </form>
+
+        <script>
+        function submitCalibration(e) {
+          e.preventDefault(); 
+          
+          const getVal = (id) => {
+            const val = document.getElementById(id).value;
+            return val !== "" ? parseFloat(val) : undefined;
+          };
+
+          const payload = {};
+          
+          const seaLevel = getVal('seaLevelhPA');
+          if (seaLevel !== undefined) payload.seaLevelhPA = seaLevel;
+          
+          const lat = getVal('latitude');
+          if (lat !== undefined) payload.latitude = lat;
+          
+          const lng = getVal('longitude');
+          if (lng !== undefined) payload.longitude = lng;
+          
+          const pitch = getVal('pitch');
+          if (pitch !== undefined) payload.pitch = pitch;
+          
+          const roll = getVal('roll');
+          if (roll !== undefined) payload.roll = roll;
+          
+          const yaw = getVal('yaw');
+          if (yaw !== undefined) payload.yaw = yaw;
+          
+          payload.useHardcodedPosition = document.getElementById('useHardcodedPosition').checked;
+          payload.useHardcodedOrientation = document.getElementById('useHardcodedOrientation').checked;
+          payload.useHardcodeYaw = document.getElementById('useHardcodeYaw').checked;
+
+          fetch('/calibrate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          })
+          .then(response => response.json())
+          .then(data => {
+            alert(data.message || 'Device calibrated successfully!');
+          })
+          .catch(err => {
+            console.error('Error:', err);
+            alert('Failed to send calibration. Check connection.');
+          });
+        }
+        </script>
+      </div>
+    </body>
+    </html>
+    )rawliteral";
+
   server.send(200, "text/html", html);
 }
 
@@ -906,6 +1038,7 @@ void setup() {
   server.on("/stream", handleStream);
   server.on("/sensors", handleSensors);
   server.on("/calibrate", HTTP_POST, handleCalibrate);
+  server.on("/calibrate", HTTP_GET, handleCalibrationPage);
   server.begin();
   Serial.println("HTTP server started");
 
@@ -1073,7 +1206,8 @@ bool readMPU6050Data() {
   /**
    * Yaw Calculation with Integration
    * 
-   * @note Will cause drift over time compared to using a 9DOF IMU (accelerometer + gyroscope + magnetometer)
+   * @note Will cause drift over time compared to using a 9DOF IMU (accelerometer + gyroscope + magnetometer).
+   * Will also not capture absolute yaw direction, only relative to when device started
    */
   static unsigned long lastTime = 0;
   unsigned long currentTime = millis();
@@ -1152,6 +1286,8 @@ void loop() {
   // Process WebSocket requests
   webSocket.loop();
 
+  // Read constantly to update yaw correctly
+  readMPU6050Data();
   
   // ========================================================================
   // SYSTEM HEARTBEAT
