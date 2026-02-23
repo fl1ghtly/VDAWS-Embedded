@@ -36,12 +36,12 @@ This project implements a multi-sensor drone system using the ESP32-S3 microcont
 
 ### Main Components
 
-| Component | Model | Purpose |
-|-----------|-------|---------|
-| Microcontroller | ESP32-S3 DevKitC-1 | Main processor with WiFi/BLE |
-| GPS Module | Generic UART GPS | Location tracking |
+| Component         | Model              | Purpose                           |
+| ----------------- | ------------------ | --------------------------------- |
+| Microcontroller   | ESP32-S3 DevKitC-1 | Main processor with WiFi/BLE      |
+| GPS Module        | Generic UART GPS   | Location tracking                 |
 | Barometric Sensor | BMP280 (GY-BMP280) | Altitude and pressure measurement |
-| Camera | OV7670 | Video capture and streaming |
+| Camera            | OV7670             | Video capture and streaming       |
 
 ### Power Requirements
 
@@ -51,18 +51,21 @@ This project implements a multi-sensor drone system using the ESP32-S3 microcont
 ## 📌 Pin Configuration
 
 ### GPS Module (UART)
+
 ```
 ESP32-S3 GPIO 16 (RX) → GPS TX
 ESP32-S3 GPIO 17 (TX) → GPS RX
 ```
 
 ### BMP280 Sensor (I2C)
+
 ```
 ESP32-S3 GPIO 8 (SDA) → BMP280 SDA
 ESP32-S3 GPIO 9 (SCL) → BMP280 SCL
 ```
 
 ### OV7670 Camera
+
 ```
 ESP32-S3 GPIO  1 → Y2 (D0)
 ESP32-S3 GPIO  2 → Y3 (D1)
@@ -105,28 +108,29 @@ ESP32-S3 GPIO 18 → SIOC (SCL)
 
 1. Install [PlatformIO](https://platformio.org/install) IDE or PlatformIO Core
 2. Install USB-to-Serial drivers for ESP32-S3
+3. AWS Account or some other cloud server provider
 
 ### Setup Steps
 
 1. Clone the repository:
+
    ```bash
    git clone https://github.com/LaiWeiQuan/VDAWS-Embedded.git
    cd VDAWS-Embedded/Drone
    ```
-
 2. Open the project in PlatformIO
-
 3. Build the project:
+
    ```bash
    pio run
    ```
-
 4. Upload to ESP32-S3:
+
    ```bash
    pio run --target upload
    ```
-
 5. Monitor serial output:
+
    ```bash
    pio device monitor
    ```
@@ -160,9 +164,48 @@ The system provides detailed diagnostics via serial monitor at 115200 baud:
 - Memory usage (heap and PSRAM)
 - System heartbeat every 5 seconds
 
+### ☁️ Remote Access (Cloud Relay)
+
+Because the ESP32 operates on a local WiFi router, you cannot send HTTP GET requests directly to it from the outside internet.
+
+To solve this, this project includes a lightweight Node.js WebSocket Relay Server. The ESP32 opens a persistent outbound tunnel to this server, allowing you to fetch live images and sensor data from anywhere in the world.
+
+#### Step 1: Launch an AWS EC2 Instance
+
+1. Log into your [AWS Management Console](https://aws.amazon.com/console/) and navigate to **EC2**.
+2. Click **Launch Instance**.
+3. **Name:** `Device-Relay-Server` (or similar).
+4. **OS Image (AMI):** Select **Ubuntu** (Ubuntu Server 24.04 LTS or 22.04 LTS).
+5. **Instance Type:** Select **t2.micro** or **t3.micro** (these are eligible for the AWS Free Tier).
+6. **Key Pair:** Click "Create new key pair", give it a name, and download the `.pem` file.
+7. Click **Launch Instance**.
+
+#### Step 2: Configure the Firewall (Security Group)
+
+By default, AWS blocks outside traffic. You must explicitly open Port 80 for the relay server to communicate with your ESP32 and Python scripts.
+
+1. On your EC2 Dashboard, click on your running instance.
+2. Go to the **Security** tab at the bottom and click the link under **Security groups**.
+3. Click **Edit inbound rules** -> **Add rule**.
+4. Add the following rule:
+   * **Rule 1 (Web Traffic):** * Type: `HTTP`
+     * Source: `Anywhere-IPv4` (`0.0.0.0/0`)
+5. Click **Save rules**.
+
+#### Step 3: Deploy the Code
+
+1. Go back to your EC2 Instance summary and click **Connect** (at the top right). Use the **EC2 Instance Connect** tab to open a terminal right in your browser.
+2. Go to /relay-server in this repository and read/run the instructions there
+
+#### Step 4: Connecting the ESP32
+
+1. Using secrets.ini.dist, create a secrets.ini file, replacing the secrets with your information
+2. Use the EC2's public IP address for the EC2_IP_ADDRESS key
+
 ## 🌐 API Endpoints
 
 ### GET `/`
+
 Returns the main HTML interface with embedded video stream.
 
 **Response**: `text/html`
@@ -170,6 +213,7 @@ Returns the main HTML interface with embedded video stream.
 ---
 
 ### GET `/stream`
+
 Provides continuous MJPEG stream from the camera.
 
 **Response**: `multipart/x-mixed-replace` with JPEG frames
@@ -181,6 +225,7 @@ Provides continuous MJPEG stream from the camera.
 ---
 
 ### GET `/capture`
+
 Captures and returns a single JPEG image.
 
 **Response**: `image/jpeg`
@@ -192,6 +237,7 @@ Captures and returns a single JPEG image.
 ### WiFi Settings
 
 Edit in `main.cpp`:
+
 ```cpp
 const char* ssid = "Drone-Cam-v2";      // Change AP name
 const char* password = "12345678";       // Change password (min 8 chars)
@@ -200,6 +246,7 @@ const char* password = "12345678";       // Change password (min 8 chars)
 ### GPS Baud Rate
 
 Default is 9600. Adjust if your GPS module uses a different rate:
+
 ```cpp
 static const uint32_t GPS_BAUD = 9600;
 ```
@@ -207,6 +254,7 @@ static const uint32_t GPS_BAUD = 9600;
 ### Camera Settings
 
 Modify camera configuration in `setup()`:
+
 ```cpp
 config.frame_size = FRAMESIZE_QVGA;     // Options: QVGA, VGA, etc.
 config.xclk_freq_hz = 12000000;         // Clock frequency (10-20 MHz)
@@ -216,6 +264,7 @@ config.jpeg_quality = 10;               // 0-63, lower = better quality
 ### BMP280 I2C Address
 
 Default attempts 0x76, then 0x77:
+
 ```cpp
 status = bmp.begin(0x76);  // Or 0x77 depending on your module
 ```
@@ -225,11 +274,13 @@ status = bmp.begin(0x76);  // Or 0x77 depending on your module
 ### Camera Issues
 
 **Problem**: Camera initialization fails
+
 - Check all pin connections, especially XCLK, PCLK, VSYNC
 - Verify 3.3V power supply is stable
 - Ensure PWDN is grounded and RESET is high
 
 **Problem**: Image quality is poor or has artifacts
+
 - Adjust JPEG quality setting (lower number = better quality)
 - Check lighting conditions
 - Verify camera lens is focused
@@ -237,6 +288,7 @@ status = bmp.begin(0x76);  // Or 0x77 depending on your module
 ### GPS Issues
 
 **Problem**: No GPS fix
+
 - Ensure clear view of sky (GPS needs satellites)
 - Check TX/RX connections (they should be crossed)
 - Verify baud rate matches GPS module
@@ -244,6 +296,7 @@ status = bmp.begin(0x76);  // Or 0x77 depending on your module
 ### BMP280 Issues
 
 **Problem**: Sensor not detected
+
 - Verify I2C connections (SDA to GPIO 8, SCL to GPIO 9)
 - Check I2C address (try both 0x76 and 0x77)
 - Ensure pull-up resistors are present on SDA/SCL lines
@@ -251,6 +304,7 @@ status = bmp.begin(0x76);  // Or 0x77 depending on your module
 ### WiFi Issues
 
 **Problem**: Cannot connect to access point
+
 - Verify ESP32-S3 has initialized (check serial monitor)
 - Ensure password is at least 8 characters
 - Try forgetting and reconnecting to the network
@@ -258,6 +312,7 @@ status = bmp.begin(0x76);  // Or 0x77 depending on your module
 ### Memory Issues
 
 **Problem**: Out of memory errors
+
 - PSRAM must be enabled (check `platformio.ini`)
 - Reduce frame buffer count
 - Lower camera resolution

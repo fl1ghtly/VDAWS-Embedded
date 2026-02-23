@@ -24,6 +24,7 @@
 #include <WebServer.h>
 #include <driver/gpio.h>
 #include <ArduinoJson.h>
+#include <WebSocketsClient.h>
 
 /**
  * @brief Workaround for sensor_t type conflict
@@ -70,6 +71,13 @@ const char* ap_password = "12345678";      ///< Access point password (minimum 8
 
 const char* sta_ssid = WIFI_SSID;      ///< WiFi network name (SSID)
 const char* sta_password = WIFI_PASS;      ///< WiFi password (minimum 8 characters)
+
+// ============================================================================
+// WebSocket CONFIGURATION
+// ============================================================================
+WebSocketsClient webSocket;
+const char* websocket_server = EC2_IP_ADDRESS;
+const int websocket_port = 80;
 
 /**
  * @brief Web server instance
@@ -214,6 +222,123 @@ TinyGPSPlus gps;
 bool readGPSLatLngTime(double* lat, double* lng, uint32_t* time);
 bool readMPU6050Data();
 void calibrateMPU6050();
+
+/**
+ * @brief Image Capture logic
+ * Automatically discards the stale frame buffer, captures a fresh frame, 
+ * and returns the JPG buffer pointers. 
+ * 
+ * @note Caller is responsible for free(*out_buf).
+ */
+bool getCapture(uint8_t **out_buf, size_t *out_len) {
+  // Discard first frame (often contains initialization artifacts)
+  camera_fb_t * fb_discard = esp_camera_fb_get();
+  if (fb_discard) esp_camera_fb_return(fb_discard);
+  delay(100); 
+  
+  camera_fb_t * fb = esp_camera_fb_get();
+  if (!fb) {
+    Serial.println("Camera capture failed");
+    return false;
+  }
+  
+  bool converted = frame2jpg(fb, 80, out_buf, out_len);
+  esp_camera_fb_return(fb); 
+  
+  if (!converted) {
+    Serial.println("JPEG conversion failed");
+    return false;
+  }
+  return true;
+}
+
+/**
+ * @brief Sensor Reading Logic
+ */
+String getSensors() {
+  JsonDocument doc;
+  
+  JsonObject position = doc["position"].to<JsonObject>();
+  double lat, lng;
+  uint32_t time;
+
+  if (readGPSLatLngTime(&lat, &lng, &time) && !useHardcodedPosition) {
+    doc["timestamp"] = time;
+    position["latitude"] = lat;
+    position["longitude"] = lng;
+  } else if (useHardcodedPosition) {
+    doc["timestamp"] = millis();
+    position["latitude"] = hardcodeLatitude;
+    position["longitude"] = hardcodeLongitude;
+  } else {
+    Serial.println("GPS Sensor read failed");
+  }
+
+  position["altitude"] = bmp.readAltitude(seaLevelhPA);
+  
+  if (!readMPU6050Data()) {
+    Serial.println("MPU-6050 Sensor read failed");
+  }
+  
+  JsonObject orientation = doc["orientation"].to<JsonObject>();
+  if (useHardcodedOrientation) {
+    orientation["pitch"] = hardcodePitch;
+    orientation["roll"] = hardcodeRoll;
+    orientation["yaw"] = hardcodeYaw;
+  } else if (useHardcodeYaw) {
+    orientation["pitch"] = mpuData.pitch;
+    orientation["roll"] = mpuData.roll;
+    orientation["yaw"] = hardcodeYaw;
+  } else {
+    orientation["pitch"] = mpuData.pitch;
+    orientation["roll"] = mpuData.roll;
+    orientation["yaw"] = mpuData.yaw;
+  }
+  
+  doc["fov"] = FOV;
+
+  String response;
+  serializeJson(doc, response);
+  return response;
+}
+
+void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
+  switch(type) {
+    case WStype_DISCONNECTED:
+      Serial.println("WebSocket Disconnected from Cloud Relay");
+      break;
+        
+    case WStype_CONNECTED:
+      Serial.println("WebSocket Connected to Cloud Relay!");
+      // Authenticate as Device "1"
+      webSocket.sendTXT("AUTH:1"); 
+      break;
+        
+    case WStype_TEXT:
+      if (strcmp((char*)payload, "CAPTURE") == 0) {
+        Serial.println("Cloud Relay requested CAPTURE");
+        
+        uint8_t *jpg_buf = NULL;
+        size_t jpg_len = 0;
+        
+        if (getCapture(&jpg_buf, &jpg_len)) {
+          webSocket.sendBIN(jpg_buf, jpg_len);
+          free(jpg_buf); // Always free the buffer
+        }
+      } 
+      else if (strcmp((char*)payload, "SENSORS") == 0) {
+        Serial.println("Cloud Relay requested SENSORS");
+        
+        String json = getSensors();
+        webSocket.sendTXT(json);
+      }
+      break;
+        
+    case WStype_BIN:
+      // Ignored - The ESP32 only pushes binary, it doesn't receive it
+      break;
+  }
+}
 
 // ============================================================================
 // WEB SERVER REQUEST HANDLERS
@@ -362,61 +487,30 @@ void handleStream() {
 void handleCapture() {
   Serial.println("Start Capture...");
   
-  // Discard first frame (often contains initialization artifacts)
-  camera_fb_t * fb_discard = esp_camera_fb_get();
-  if (fb_discard) {
-    esp_camera_fb_return(fb_discard);
-  }
-  
-  delay(100); // Allow camera exposure and settings to stabilize
-  
-  // Capture frame from camera
-  camera_fb_t * fb = NULL;
-  fb = esp_camera_fb_get();
-  if (!fb) {
-    Serial.println("Camera capture failed");
-    server.send(500, "text/plain", "Camera capture failed");
-    return;
-  }
-  Serial.printf("Frame captured. Width: %d, Height: %d, Size: %d bytes\n", 
-                fb->width, fb->height, fb->len);
-  
-  /**
-   * Convert RGB565 to JPEG with quality 80
-   * Higher quality than streaming (85) for better single-shot images
-   * Measure conversion time for performance monitoring
-   */
-  uint8_t * jpg_buf = NULL;
+  uint8_t *jpg_buf = NULL;
   size_t jpg_len = 0;
-  unsigned long start = millis();
-  bool converted = frame2jpg(fb, 80, &jpg_buf, &jpg_len);
-  unsigned long end = millis();
-  Serial.printf("JPEG conversion took %lu ms, size: %d bytes\n", end - start, jpg_len);
-  
-  esp_camera_fb_return(fb); // Return frame buffer to driver
-  
-  if (!converted) {
-    Serial.println("JPEG conversion failed");
-    server.send(500, "text/plain", "JPEG conversion failed");
-    return;
-  }
-  
+
   /**
    * Send JPEG image to client
    * Uses Content-Disposition: inline to display in browser
    * Alternative: use "attachment" to force download
    */
-  WiFiClient client = server.client();
-  client.write("HTTP/1.1 200 OK\r\n");
-  client.write("Content-Type: image/jpeg\r\n");
-  client.write("Content-Disposition: inline; filename=capture.jpg\r\n");
-  client.write("Content-Length: ");
-  client.print(jpg_len);
-  client.write("\r\n\r\n");
-  client.write(jpg_buf, jpg_len);
-  
-  free(jpg_buf); // Free allocated JPEG buffer
-  Serial.println("Capture sent successfully");
+  if (getCapture(&jpg_buf, &jpg_len)) {
+    WiFiClient client = server.client();
+    client.write("HTTP/1.1 200 OK\r\n");
+    client.write("Content-Type: image/jpeg\r\n");
+    client.write("Content-Disposition: inline; filename=capture.jpg\r\n");
+    client.write("Content-Length: ");
+    client.print(jpg_len);
+    client.write("\r\n\r\n");
+    client.write(jpg_buf, jpg_len);
+
+    free(jpg_buf); // Free allocated JPEG buffer
+    Serial.println("Capture sent successfully");
+  } else {
+    server.send(500, "text/plain", "Camera or conversion failed");
+    Serial.println("Capture failed");
+  }
 }
 
 /**
@@ -430,72 +524,7 @@ void handleCapture() {
  */
 void handleSensors() {
   Serial.println("Start Sensors...");
-
-  JsonDocument doc;
-  
-  // Get the position of the device
-  JsonObject position = doc["position"].to<JsonObject>();
-  double lat, lng;
-  uint32_t time;
-
-  bool gpsStatus = readGPSLatLngTime(&lat, &lng, &time);
-  if (gpsStatus && !useHardcodedPosition) {
-    doc["timestamp"] = time;
-    position["latitude"] = lat;
-    position["longitude"] = lng;
-  } else if (useHardcodedPosition) {
-    doc["timestamp"] = millis();
-    position["latitude"] = hardcodeLatitude;
-    position["longitude"] = hardcodeLongitude;
-  } else {
-    Serial.println("GPS Sensor read failed");
-    server.send(500, "text/plain", "GPS Sensor failed to read");
-    return;
-  }
-
-  position["altitude"] = bmp.readAltitude(seaLevelhPA);
-  
-  // Get the IMU sensor data
-  bool mpuStatus = readMPU6050Data();
-  if (!mpuStatus) {
-    Serial.println("MPU-6050 Sensor read failed");
-    server.send(500, "text/plain", "MPU-6050 Sensor failed to read");
-    return;
-  }
-  
-  // Add accelerometer data
-  // JsonObject acceleration = doc["acceleration"].to<JsonObject>();
-  // acceleration["ax"] = mpuData.accelX;
-  // acceleration["ay"] = mpuData.accelY;
-  // acceleration["az"] = mpuData.accelZ;
-  
-  // Add gyroscope data (rotation rates)
-  // JsonObject rotation = doc["rotation"].to<JsonObject>();
-  // rotation["rx"] = mpuData.gyroX;
-  // rotation["ry"] = mpuData.gyroY;
-  // rotation["rz"] = mpuData.gyroZ;
-  
-  // Add orientation angles (pitch and roll from accelerometerm, yaw from integration)
-  JsonObject orientation = doc["orientation"].to<JsonObject>();
-
-  if (useHardcodedOrientation) {
-    orientation["pitch"] = hardcodePitch;
-    orientation["roll"] = hardcodeRoll;
-    orientation["yaw"] = hardcodeYaw;
-  } else if (useHardcodeYaw) {
-    orientation["pitch"] = mpuData.pitch;
-    orientation["roll"] = mpuData.roll;
-    orientation["yaw"] = hardcodeYaw;
-  } else {
-    orientation["pitch"] = mpuData.pitch;
-    orientation["roll"] = mpuData.roll;
-    orientation["yaw"] = mpuData.yaw;
-  }
-  
-  doc["fov"] = FOV;
-
-  String response;
-  serializeJson(doc, response);
+  String response = getSensors();
   server.send(200, "application/json", response);
 }
 
@@ -880,6 +909,9 @@ void setup() {
   server.begin();
   Serial.println("HTTP server started");
 
+  webSocket.begin(websocket_server, websocket_port, "/");
+  webSocket.onEvent(webSocketEvent);
+
   // ========================================================================
   // STARTUP DIAGNOSTICS
   // ========================================================================
@@ -1117,6 +1149,9 @@ void loop() {
    * Must be called frequently to maintain responsive web interface
    */
   server.handleClient();
+  // Process WebSocket requests
+  webSocket.loop();
+
   
   // ========================================================================
   // SYSTEM HEARTBEAT
