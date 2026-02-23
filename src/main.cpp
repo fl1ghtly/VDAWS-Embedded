@@ -24,7 +24,6 @@
 #include <WebServer.h>
 #include <driver/gpio.h>
 #include <ArduinoJson.h>
-#include <husarnet.h>
 
 /**
  * @brief Workaround for sensor_t type conflict
@@ -71,20 +70,6 @@ const char* ap_password = "12345678";      ///< Access point password (minimum 8
 
 const char* sta_ssid = WIFI_SSID;      ///< WiFi network name (SSID)
 const char* sta_password = WIFI_PASS;      ///< WiFi password (minimum 8 characters)
-
-// ============================================================================
-// HUSARNET CONFIGURATION
-// ============================================================================
-/**
- * @brief Husarnet Credentials
- * 
- * The ESP32-S3 joins a Husarnet Network with the join code and device name HOSTNAME
- * 
- */
-const char* HOSTNAME = HUSAR_HOSTNAME;
-const char* JOIN_CODE = HUSAR_JOIN_CODE;
-
-HusarnetClient husarnet;
 
 /**
  * @brief Web server instance
@@ -721,8 +706,9 @@ void setup() {
    */
   Serial.println("Pre-enabling XCLK on GPIO 11...");
   pinMode(XCLK_GPIO_NUM, OUTPUT);
-  ledcAttach(XCLK_GPIO_NUM, 20000000, 1);
-  ledcWrite(XCLK_GPIO_NUM, 1); // 50% duty cycle
+  ledcSetup(7, 20000000, 1); // 20 MHz XCLK using LEDC channel 7
+  ledcAttachPin(XCLK_GPIO_NUM, 7);
+  ledcWrite(7, 1); // 50% duty cycle
   delay(500); // Allow clock to stabilize
   
   /**
@@ -738,7 +724,7 @@ void setup() {
   Wire1.end();
   
   // Release manual LEDC control before camera driver takes over
-  ledcDetach(XCLK_GPIO_NUM);
+  ledcDetachPin(XCLK_GPIO_NUM);
   Serial.println("Handing over to camera driver...");
 
   // ========================================================================
@@ -876,23 +862,6 @@ void setup() {
   Serial.print("STA IP: ");
   Serial.println(WiFi.localIP());
   
-  // ========================================================================
-  // HUSARNET INITIALIZATION
-  // ========================================================================
-  /**
-   * Join the Husarnet network
-   */
-  husarnet.join(HOSTNAME, JOIN_CODE);
-
-  while (!husarnet.isJoined()) {
-    Serial.println("Waiting for Husarnet network");
-    delay(1000);
-  }
-  Serial.println("Husarnet network joined");
-
-  Serial.print("Husarnet IP: ");
-  Serial.println(husarnet.getIpAddress().c_str());
-
   // ========================================================================
   // WEB SERVER INITIALIZATION
   // ========================================================================
