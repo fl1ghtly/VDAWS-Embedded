@@ -31,7 +31,7 @@ wss.on('connection', (ws) => {
     });
 });
 
-app.get('/:deviceId/camera', (req, res) => {
+app.get('/:deviceId/capture', (req, res) => {
     const deviceId = req.params.deviceId;
     const deviceSocket = devices[deviceId];
 
@@ -59,7 +59,7 @@ app.get('/:deviceId/camera', (req, res) => {
     }, 5000);
 });
 
-app.get('/:deviceId/sensor', (req, res) => {
+app.get('/:deviceId/sensors', (req, res) => {
     const deviceId = req.params.deviceId;
     const deviceSocket = devices[deviceId];
 
