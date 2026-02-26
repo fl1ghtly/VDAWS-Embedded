@@ -311,7 +311,7 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
     case WStype_CONNECTED:
       Serial.println("WebSocket Connected to Cloud Relay!");
       // Authenticate as Device "1"
-      webSocket.sendTXT("AUTH:1"); 
+      webSocket.sendTXT("AUTH:" + WiFi.macAddress()); 
       break;
         
     case WStype_TEXT:
@@ -1013,6 +1013,7 @@ void setup() {
   Serial.print("Connecting to WiFi: ");
   Serial.println(sta_ssid);
   WiFi.begin(sta_ssid, sta_password);
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);
   
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
