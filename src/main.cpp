@@ -304,6 +304,37 @@ String getSensors() {
   return response;
 }
 
+/**
+ * @brief Applies calibration settings from a parsed JSON document
+ * Updates global variables and prints the new configuration.
+ */
+void applyCalibration(JsonDocument& doc) {
+  // Apply environment calibration
+  seaLevelhPA = doc["seaLevelhPA"] | seaLevelhPA;
+
+  // Apply position calibration
+  hardcodeLatitude = doc["latitude"] | hardcodeLatitude;
+  hardcodeLongitude = doc["longitude"] | hardcodeLongitude;
+  useHardcodedPosition = doc["useHardcodedPosition"] | useHardcodedPosition;
+
+  // Apply orientation calibration
+  hardcodePitch = doc["pitch"] | hardcodePitch;
+  hardcodeRoll = doc["roll"] | hardcodeRoll;
+  hardcodeYaw = doc["yaw"] | hardcodeYaw;
+  useHardcodedOrientation = doc["useHardcodedOrientation"] | useHardcodedOrientation;
+  useHardcodeYaw = doc["useHardcodeYaw"] | useHardcodeYaw;
+  
+  // Log the new state
+  Serial.println("--- New Calibration Applied ---");
+  Serial.printf("Sea Level hPA: %.2f\n", seaLevelhPA);
+  Serial.printf("Hardcoded Position: %s (%.6f, %.6f)\n", 
+                useHardcodedPosition ? "ON" : "OFF", hardcodeLatitude, hardcodeLongitude);
+  Serial.printf("Hardcoded Orientation: %s\n", useHardcodedOrientation ? "ON" : "OFF");
+  Serial.printf("Hardcoded Yaw Only: %s\n", useHardcodeYaw ? "ON" : "OFF");
+  Serial.printf("Angles (P,R,Y): %.2f, %.2f, %.2f\n", hardcodePitch, hardcodeRoll, hardcodeYaw);
+  Serial.println("-------------------------------");
+}
+
 void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
   switch(type) {
     case WStype_DISCONNECTED:
@@ -348,17 +379,7 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
           return;
         }
 
-        // Apply the new calibration values (same as your local HTTP endpoint)
-        seaLevelhPA = doc["seaLevelhPA"] | seaLevelhPA;
-        hardcodeLatitude = doc["latitude"] | hardcodeLatitude;
-        hardcodeLongitude = doc["longitude"] | hardcodeLongitude;
-        useHardcodedPosition = doc["useHardcodedPosition"] | useHardcodedPosition;
-        
-        hardcodePitch = doc["pitch"] | hardcodePitch;
-        hardcodeRoll = doc["roll"] | hardcodeRoll;
-        hardcodeYaw = doc["yaw"] | hardcodeYaw;
-        useHardcodedOrientation = doc["useHardcodedOrientation"] | useHardcodedOrientation;
-        useHardcodeYaw = doc["useHardcodeYaw"] | useHardcodeYaw;
+        applyCalibration(doc);
         
         Serial.println("Device Calibrated via WebSocket successfully!");
       }
@@ -717,42 +738,7 @@ void handleCalibrate() {
     return;
   }
 
-  // Change sea level pressure if data exists, otherwise leave as is
-  seaLevelhPA = doc["seaLevelhPA"] | seaLevelhPA;
-
-  // Change position
-  hardcodeLatitude = doc["latitude"] | hardcodeLatitude;
-  hardcodeLongitude = doc["longitude"] | hardcodeLongitude;
-  useHardcodedPosition = doc["useHardcodedPosition"] | useHardcodedPosition;
-
-  // Change orientation
-  hardcodePitch = doc["pitch"] | hardcodePitch;
-  hardcodeRoll = doc["roll"] | hardcodeRoll;
-  hardcodeYaw = doc["yaw"] | hardcodeYaw;
-  useHardcodedOrientation = doc["useHardcodedOrientation"] | useHardcodedOrientation;
-  useHardcodeYaw = doc["useHardcodeYaw"] | useHardcodeYaw;
-  
-  Serial.println("New Calibration values:");
-  Serial.print("Sea Level hPA: ");
-  Serial.println(seaLevelhPA);
-
-  Serial.print("Hardcoded Latitude: ");
-  Serial.println(hardcodeLatitude, 6);
-  Serial.print("Hardcoded Longitude: ");
-  Serial.println(hardcodeLongitude, 6);
-  Serial.print("Use Hardcoded Position: ");
-  Serial.println(useHardcodedPosition ? "true" : "false");
-  
-  Serial.print("Hardcoded Pitch: ");
-  Serial.println(hardcodePitch);
-  Serial.print("Hardcoded Roll: ");
-  Serial.println(hardcodeRoll);
-  Serial.print("Hardcoded Yaw: ");
-  Serial.println(hardcodeYaw);
-  Serial.print("Use Hardcoded Orientation: ");
-  Serial.println(useHardcodedOrientation ? "true" : "false");
-  Serial.print("Use Hardcoded Yaw: ");
-  Serial.println(useHardcodeYaw ? "true" : "false");
+  applyCalibration(doc);
 
   server.send(200, "application/json", "{\"status\":\"success\", \"message\":\"Device calibrated successfully\"}");
 }
