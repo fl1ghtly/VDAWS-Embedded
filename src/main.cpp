@@ -72,6 +72,8 @@ const char* ap_password = "12345678";      ///< Access point password (minimum 8
 const char* sta_ssid = WIFI_SSID;      ///< WiFi network name (SSID)
 const char* sta_password = WIFI_PASS;      ///< WiFi password (minimum 8 characters)
 
+const String dev_name = DEVICE_NAME;
+
 // ============================================================================
 // WebSocket CONFIGURATION
 // ============================================================================
@@ -196,8 +198,8 @@ float hardcodeRoll = 0;
  * Uses HardwareSerial port 1 for communication with GPS module.
  * Typical GPS modules output NMEA sentences at 9600 baud.
  */
-static const int GPS_RX_PIN = 16;      ///< ESP32 RX (connects to GPS TX)
-static const int GPS_TX_PIN = 17;      ///< ESP32 TX (connects to GPS RX, rarely used)
+static const int GPS_RX_PIN = 17;      ///< ESP32 RX (connects to GPS TX)
+static const int GPS_TX_PIN = 16;      ///< ESP32 TX (connects to GPS RX, rarely used)
 static const uint32_t GPS_BAUD = 9600; ///< GPS serial baud rate
 
 // Hard coded values to use for position if required. Can be changed under the /calibrate endpoint
@@ -310,8 +312,8 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
         
     case WStype_CONNECTED:
       Serial.println("WebSocket Connected to Cloud Relay!");
-      // Authenticate as Device "1"
-      webSocket.sendTXT("AUTH:" + WiFi.macAddress()); 
+      // Authenticate as device name
+      webSocket.sendTXT("AUTH:" + dev_name); 
       break;
         
     case WStype_TEXT:
@@ -331,6 +333,34 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
         
         String json = getSensors();
         webSocket.sendTXT(json);
+      } else if (strncmp((char*)payload, "CALIBRATE:", 10) == 0) {
+        Serial.println("Cloud Relay sent CALIBRATE command");
+        
+        // Skip the "CALIBRATE:" prefix (which is 10 characters long) to grab just the JSON
+        char* jsonString = (char*)payload + 10;
+        
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, jsonString);
+
+        if (err) {
+          Serial.print("WebSocket Calibration JSON failed: ");
+          Serial.println(err.c_str());
+          return;
+        }
+
+        // Apply the new calibration values (same as your local HTTP endpoint)
+        seaLevelhPA = doc["seaLevelhPA"] | seaLevelhPA;
+        hardcodeLatitude = doc["latitude"] | hardcodeLatitude;
+        hardcodeLongitude = doc["longitude"] | hardcodeLongitude;
+        useHardcodedPosition = doc["useHardcodedPosition"] | useHardcodedPosition;
+        
+        hardcodePitch = doc["pitch"] | hardcodePitch;
+        hardcodeRoll = doc["roll"] | hardcodeRoll;
+        hardcodeYaw = doc["yaw"] | hardcodeYaw;
+        useHardcodedOrientation = doc["useHardcodedOrientation"] | useHardcodedOrientation;
+        useHardcodeYaw = doc["useHardcodeYaw"] | useHardcodeYaw;
+        
+        Serial.println("Device Calibrated via WebSocket successfully!");
       }
       break;
         
@@ -1013,7 +1043,7 @@ void setup() {
   Serial.print("Connecting to WiFi: ");
   Serial.println(sta_ssid);
   WiFi.begin(sta_ssid, sta_password);
-  WiFi.setTxPower(WIFI_POWER_8_5dBm);
+  // WiFi.setTxPower(WIFI_POWER_8_5dBm);
   
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
