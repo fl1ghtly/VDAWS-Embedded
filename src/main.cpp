@@ -25,6 +25,12 @@
 #include <driver/gpio.h>
 #include <ArduinoJson.h>
 #include <WebSocketsClient.h>
+#include <Preferences.h>
+
+/**
+ * @brief Flash memory storage of calibration values
+ */
+Preferences preferences;
 
 /**
  * @brief Workaround for sensor_t type conflict
@@ -324,6 +330,19 @@ void applyCalibration(JsonDocument& doc) {
   useHardcodedOrientation = doc["useHardcodedOrientation"] | useHardcodedOrientation;
   useHardcodeYaw = doc["useHardcodeYaw"] | useHardcodeYaw;
   
+  // Save to flash
+  preferences.putFloat("seaLevel", seaLevelhPA);
+  
+  preferences.putBool("usePos", useHardcodedPosition);
+  preferences.putDouble("lat", hardcodeLatitude);
+  preferences.putDouble("lng", hardcodeLongitude);
+  
+  preferences.putBool("useOri", useHardcodedOrientation);
+  preferences.putBool("useYaw", useHardcodeYaw);
+  preferences.putFloat("pitch", hardcodePitch);
+  preferences.putFloat("roll", hardcodeRoll);
+  preferences.putFloat("yaw", hardcodeYaw);
+
   // Log the new state
   Serial.println("--- New Calibration Applied ---");
   Serial.printf("Sea Level hPA: %.2f\n", seaLevelhPA);
@@ -333,6 +352,22 @@ void applyCalibration(JsonDocument& doc) {
   Serial.printf("Hardcoded Yaw Only: %s\n", useHardcodeYaw ? "ON" : "OFF");
   Serial.printf("Angles (P,R,Y): %.2f, %.2f, %.2f\n", hardcodePitch, hardcodeRoll, hardcodeYaw);
   Serial.println("-------------------------------");
+}
+
+void clearPreferences() {
+  // Wipe the flash memory for the "calib" namespace
+  preferences.clear(); 
+
+  // Reset the live RAM variables back to safe defaults
+  seaLevelhPA = 1013.25;
+  useHardcodedPosition = false;
+  hardcodeLatitude = 0.0;
+  hardcodeLongitude = 0.0;
+  useHardcodedOrientation = false;
+  useHardcodeYaw = false;
+  hardcodePitch = 0.0;
+  hardcodeRoll = 0.0;
+  hardcodeYaw = 0.0;
 }
 
 void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
@@ -382,6 +417,12 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
         applyCalibration(doc);
         
         Serial.println("Device Calibrated via WebSocket successfully!");
+      } else if (strcmp((char*)payload, "CLEAR") == 0) {
+        Serial.println("Cloud Relay sent CLEAR command. Wiping flash memory...");
+        
+        clearPreferences();
+        
+        Serial.println("Calibration erased and reset to defaults.");
       }
       break;
         
@@ -743,6 +784,14 @@ void handleCalibrate() {
   server.send(200, "application/json", "{\"status\":\"success\", \"message\":\"Device calibrated successfully\"}");
 }
 
+void handleClear() {
+  Serial.println("Clearing preferences from flash");
+  
+  clearPreferences();
+  
+  server.send(200, "application/json", "{\"status\":\"success\", \"message\":\"Device preferences cleared successfully\"}");
+}
+
 /**
  * @brief System initialization and configuration
  * 
@@ -761,9 +810,35 @@ void setup() {
   // Initialize USB serial for debugging output
   Serial.begin(115200);
 
+
+  
   // Wait for Serial Monitor connection (useful for debugging startup)
   delay(5000);
   Serial.println("\n\n--- ESP32-S3 Drone System Starting ---");
+
+  // ========================================================================
+  // LOAD SAVED CALIBRAITON
+  // ========================================================================
+  Serial.println("Loading saved calibration data...");
+
+  // Open 'calib' namespace in Read/Write mode
+  preferences.begin("calib", false);
+
+  // Read values. The second argument is the default value if nothing is saved yet.
+  // Note: Preferences keys have a strict MAXIMUM length of 15 characters
+  seaLevelhPA = preferences.getFloat("seaLevel", 1013.25);
+  
+  useHardcodedPosition = preferences.getBool("usePos", false);
+  hardcodeLatitude = preferences.getDouble("lat", 0.0);
+  hardcodeLongitude = preferences.getDouble("lng", 0.0);
+  
+  useHardcodedOrientation = preferences.getBool("useOri", false);
+  useHardcodeYaw = preferences.getBool("useYaw", false);
+  hardcodePitch = preferences.getFloat("pitch", 0.0);
+  hardcodeRoll = preferences.getFloat("roll", 0.0);
+  hardcodeYaw = preferences.getFloat("yaw", 0.0);
+
+  Serial.println("Calibration loaded.");
 
   // ========================================================================
   // I2C INITIALIZATION
@@ -1054,6 +1129,7 @@ void setup() {
   server.on("/capture", handleCapture);
   server.on("/stream", handleStream);
   server.on("/sensors", handleSensors);
+  server.on("/clear", handleClear);
   server.on("/calibrate", HTTP_POST, handleCalibrate);
   server.on("/calibrate", HTTP_GET, handleCalibrationPage);
   server.begin();

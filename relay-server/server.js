@@ -110,6 +110,22 @@ app.post('/:deviceId/calibrate', (req, res) => {
     res.json({ status: "success", message: `Calibration sent to ${deviceId}` });
 });
 
+// POST endpoint to clear calibration
+app.post('/:deviceId/clear', (req, res) => {
+    const deviceId = req.params.deviceId;
+    const deviceSocket = devices[deviceId];
+
+    // Check if the drone is connected
+    if (!deviceSocket || deviceSocket.readyState !== WebSocket.OPEN) {
+        return res.status(404).json({ error: `Device ${deviceId} is offline.` });
+    }
+
+    // Send the CLEAR command down the WebSocket
+    deviceSocket.send("CLEAR");
+
+    res.json({ status: "success", message: `Memory erased on ${deviceId}` });
+});
+
 // Serve the Calibration Web Dashboard
 app.get('/calibrate', (req, res) => {
     res.send(`
@@ -191,6 +207,7 @@ app.get('/calibrate', (req, res) => {
           </div>
           
           <button type="submit">Deploy Calibration to Device</button>
+          <button type="button" onclick="clearCalibration(event)" style="background: #f38ba8; margin-top: 10px; color: #11111b;">Factory Reset Device</button>
         </form>
 
         <script>
@@ -234,6 +251,33 @@ app.get('/calibrate', (req, res) => {
           .catch(err => {
             console.error('Error:', err);
             alert('Failed to send calibration. Check server connection.');
+          });
+        }
+
+        function clearCalibration(e) {
+          e.preventDefault();
+          
+          const deviceId = document.getElementById('deviceId').value.trim();
+          if (!deviceId) return alert("Please enter a Target Device ID!");
+          
+          // Add a safety check so you don't accidentally click it
+          if (!confirm('Are you sure you want to wipe the calibration memory on ' + deviceId + '?')) return;
+
+          // Send POST request to the new /clear endpoint
+          fetch('/' + deviceId + '/clear', {
+            method: 'POST'
+          })
+          .then(response => response.json())
+          .then(data => {
+            if (data.error) alert('Error: ' + data.error);
+            else alert(data.message || 'Memory cleared successfully!');
+            
+            // Optional: clear the form inputs
+            document.getElementById('calForm').reset(); 
+          })
+          .catch(err => {
+            console.error('Error:', err);
+            alert('Failed to send clear command. Check connection.');
           });
         }
         </script>
