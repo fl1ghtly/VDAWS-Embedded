@@ -226,8 +226,10 @@ static const uint32_t GPS_BAUD = 9600; ///< GPS serial baud rate
 
 // Hard coded values to use for position if required. Can be changed under the /calibrate endpoint
 bool useHardcodedPosition = false;
+bool useHardcodedAltitude = false;
 double hardcodeLatitude = 0;
 double hardcodeLongitude = 0;
+float hardcodeAltitude = 0;
 
 /**
  * @brief Hardware serial port for GPS communication
@@ -298,7 +300,11 @@ String getSensors() {
     Serial.println("GPS Sensor read failed");
   }
 
-  position["altitude"] = bmp.readAltitude(seaLevelhPA);
+  if (useHardcodedAltitude) {
+    position["altitude"] = hardcodeAltitude;
+  } else {
+    position["altitude"] = bmp.readAltitude(seaLevelhPA);
+  }
   
   if (!readMPU6050Data()) {
     Serial.println("MPU-6050 Sensor read failed");
@@ -337,7 +343,9 @@ void applyCalibration(JsonDocument& doc) {
   // Apply position calibration
   hardcodeLatitude = doc["latitude"] | hardcodeLatitude;
   hardcodeLongitude = doc["longitude"] | hardcodeLongitude;
+  hardcodeAltitude = doc["altitude"] | hardcodeAltitude;
   useHardcodedPosition = doc["useHardcodedPosition"] | useHardcodedPosition;
+  useHardcodedAltitude = doc["useHardcodedAltitude"] | useHardcodedAltitude;
 
   // Apply orientation calibration
   hardcodePitch = doc["pitch"] | hardcodePitch;
@@ -350,8 +358,10 @@ void applyCalibration(JsonDocument& doc) {
   preferences.putFloat("seaLevel", seaLevelhPA);
   
   preferences.putBool("usePos", useHardcodedPosition);
+  preferences.putBool("useAlt", useHardcodedPosition);
   preferences.putDouble("lat", hardcodeLatitude);
   preferences.putDouble("lng", hardcodeLongitude);
+  preferences.putFloat("alt", hardcodeAltitude);
   
   preferences.putBool("useOri", useHardcodedOrientation);
   preferences.putBool("useYaw", useHardcodeYaw);
@@ -362,8 +372,9 @@ void applyCalibration(JsonDocument& doc) {
   // Log the new state
   Serial.println("--- New Calibration Applied ---");
   Serial.printf("Sea Level hPA: %.2f\n", seaLevelhPA);
-  Serial.printf("Hardcoded Position: %s (%.6f, %.6f)\n", 
-                useHardcodedPosition ? "ON" : "OFF", hardcodeLatitude, hardcodeLongitude);
+  Serial.printf("Hardcoded Position: %s (Lat: %.6f, Lon: %.6f, Alt: %.2fm)\n", 
+                useHardcodedPosition ? "ON" : "OFF", hardcodeLatitude, hardcodeLongitude, hardcodeAltitude);
+  Serial.printf("Use Hardcoded Alt Only: %s\n", useHardcodedAltitude ? "ON" : "OFF");
   Serial.printf("Hardcoded Orientation: %s\n", useHardcodedOrientation ? "ON" : "OFF");
   Serial.printf("Hardcoded Yaw Only: %s\n", useHardcodeYaw ? "ON" : "OFF");
   Serial.printf("Angles (P,R,Y): %.2f, %.2f, %.2f\n", hardcodePitch, hardcodeRoll, hardcodeYaw);
@@ -377,8 +388,10 @@ void clearPreferences() {
   // Reset the live RAM variables back to safe defaults
   seaLevelhPA = 1013.25;
   useHardcodedPosition = false;
+  useHardcodedAltitude = false;
   hardcodeLatitude = 0.0;
   hardcodeLongitude = 0.0;
+  hardcodeAltitude = 0.0;
   useHardcodedOrientation = false;
   useHardcodeYaw = false;
   hardcodePitch = 0.0;
@@ -884,8 +897,10 @@ void setup() {
   seaLevelhPA = preferences.getFloat("seaLevel", 1013.25);
   
   useHardcodedPosition = preferences.getBool("usePos", false);
+  useHardcodedAltitude = preferences.getBool("useAlt", false);
   hardcodeLatitude = preferences.getDouble("lat", 0.0);
   hardcodeLongitude = preferences.getDouble("lng", 0.0);
+  hardcodeAltitude = preferences.getFloat("alt", 0.0);
   
   useHardcodedOrientation = preferences.getBool("useOri", false);
   useHardcodeYaw = preferences.getBool("useYaw", false);
