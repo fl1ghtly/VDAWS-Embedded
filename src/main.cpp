@@ -72,11 +72,27 @@ volatile unsigned long last_vsync_time = 0;  ///< Timestamp of last VSYNC edge
  * 
  * The ESP32-S3 also connects to a wifi network to send data over the internet.
  */
+struct WiFiNetwork {
+  const char* ssid;
+  const char* password;
+};
+
 const char* ap_ssid = "Drone-Cam-v2";      ///< Access point network name (SSID)
 const char* ap_password = "12345678";      ///< Access point password (minimum 8 characters)
 
-const char* sta_ssid = WIFI_SSID;      ///< WiFi network name (SSID)
-const char* sta_password = WIFI_PASS;      ///< WiFi password (minimum 8 characters)
+const WiFiNetwork networks[] = {
+  #ifdef WIFI_SSID_1
+    {WIFI_SSID_1, WIFI_PASS_1},
+  #endif
+  #ifdef WIFI_SSID_2
+    {WIFI_SSID_2, WIFI_PASS_2},
+  #endif
+  #ifdef WIFI_SSID_3
+    {WIFI_SSID_3, WIFI_PASS_3},
+  #endif
+};
+
+const int numNetworks = sizeof(networks) / sizeof(WiFiNetwork);
 
 const String dev_name = DEVICE_NAME;
 
@@ -793,6 +809,45 @@ void handleClear() {
 }
 
 /**
+ * @brief Connect to a WiFi network using a priority list
+ * 
+ */
+void connectToWiFiNetworks(int maxRetries) {
+  Serial.println("Starting WiFi connection sequence...");
+  
+  // Try each network
+  for (int i = 0; i < numNetworks; i++) {
+    Serial.printf("\nAttempting connection to Priority %d: %s\n", i + 1, networks[i].ssid);
+
+    // Disconnect from previous WiFi to have a clean slate
+    WiFi.disconnect();
+    delay(100);
+
+    WiFi.begin(networks[i].ssid, networks[i].password);
+
+    int retries = 0;
+    while (WiFi.status() != WL_CONNECTED && retries < maxRetries) {
+      delay(500);
+      Serial.print(".");
+      retries++;
+    }
+    
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.println("Successfully connected to WiFi");
+      Serial.print("STA IP: ");
+      Serial.println(WiFi.localIP());
+      break;
+    }
+
+    Serial.printf("\nFailed to connect to %s\n", networks[i].ssid);
+  }
+
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Failed to connect to any WiFi networks.");
+  }
+}
+
+/**
  * @brief System initialization and configuration
  * 
  * Performs one-time setup of all hardware components and communication
@@ -1101,19 +1156,8 @@ void setup() {
   Serial.println(WiFi.softAPIP()); // Typically 192.168.4.1
 
   // Connect ESP32-S3 to WiFi Network
-  Serial.print("Connecting to WiFi: ");
-  Serial.println(sta_ssid);
-  WiFi.begin(sta_ssid, sta_password);
+  connectToWiFiNetworks(20);
   // WiFi.setTxPower(WIFI_POWER_8_5dBm);
-  
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  
-  Serial.println("Successfully connected to WiFi");
-  Serial.print("STA IP: ");
-  Serial.println(WiFi.localIP());
   
   // ========================================================================
   // WEB SERVER INITIALIZATION
