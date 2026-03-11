@@ -145,13 +145,27 @@ function runSolvePnP() {
   let objPoints = cv.matFromArray(pointPairs.length, 1, cv.CV_32FC3, objPointsArray);
   let imgPoints = cv.matFromArray(pointPairs.length, 1, cv.CV_32FC2, imgPointsArray);
 
-  // TODO: Replace Intrinsic Camera Matrix
+  // Read dynamic camera parameters from the UI
+  const fx = parseFloat(document.getElementById('fx').value) || 720.0;
+  const fy = parseFloat(document.getElementById('fy').value) || 720.0;
+  const cx = parseFloat(document.getElementById('cx').value) || 160.0;
+  const cy = parseFloat(document.getElementById('cy').value) || 120.0;
+
+  const k1 = parseFloat(document.getElementById('k1').value) || 0;
+  const k2 = parseFloat(document.getElementById('k2').value) || 0;
+  const p1 = parseFloat(document.getElementById('p1').value) || 0;
+  const p2 = parseFloat(document.getElementById('p2').value) || 0;
+  const k3 = parseFloat(document.getElementById('k3').value) || 0;
+
+  // Construct the matrices for OpenCV
   let camMatrix = cv.matFromArray(3, 3, cv.CV_64F, [
-    300.0, 0, 160.0,
-    0, 300.0, 120.0,
-    0, 0, 1.0
+    fx,  0, cx,
+     0, fy, cy,
+     0,  0,  1
   ]);
-  let distCoeffs = cv.matFromArray(4, 1, cv.CV_64F, [0, 0, 0, 0]);
+  
+  // Use the 5-parameter distortion array standard for OpenCV checkerboard calibration
+  let distCoeffs = cv.matFromArray(5, 1, cv.CV_64F, [k1, k2, p1, p2, k3]);
   
   let rvec = new cv.Mat(), tvec = new cv.Mat();
 

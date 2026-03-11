@@ -57,6 +57,34 @@
       </div>
     </div>
 
+    <div class="panel" style="margin-bottom: 20px;">
+      <h3 style="margin-top: 0;">Lens Parameters</h3>
+      <div style="display: flex; gap: 20px; justify-content: center; flex-wrap: wrap;">
+        
+        <div style="background: #313244; padding: 15px; border-radius: 8px;">
+          <h4 style="margin-top: 0; color: #a6adc8; text-align: center;">Intrinsic Matrix</h4>
+          <div style="display: grid; grid-template-columns: auto auto; gap: 10px; align-items: center;">
+            <label>fx (Focal X):</label> <input type="number" step="any" id="fx" value="720.0" style="width: 80px;">
+            <label>fy (Focal Y):</label> <input type="number" step="any" id="fy" value="720.0" style="width: 80px;">
+            <label>cx (Center X):</label> <input type="number" step="any" id="cx" value="160.0" style="width: 80px;">
+            <label>cy (Center Y):</label> <input type="number" step="any" id="cy" value="120.0" style="width: 80px;">
+          </div>
+        </div>
+
+        <div style="background: #313244; padding: 15px; border-radius: 8px;">
+          <h4 style="margin-top: 0; color: #a6adc8; text-align: center;">Distortion (5-Param)</h4>
+          <div style="display: grid; grid-template-columns: auto auto; gap: 10px; align-items: center;">
+            <label>k1:</label> <input type="number" step="any" id="k1" value="0" style="width: 80px;">
+            <label>k2:</label> <input type="number" step="any" id="k2" value="0" style="width: 80px;">
+            <label>p1:</label> <input type="number" step="any" id="p1" value="0" style="width: 80px;">
+            <label>p2:</label> <input type="number" step="any" id="p2" value="0" style="width: 80px;">
+            <label>k3:</label> <input type="number" step="any" id="k3" value="0" style="width: 80px;">
+          </div>
+        </div>
+
+      </div>
+    </div>
+
     <table id="pointsTable">
       <tr>
         <th>Point #</th>
