@@ -219,16 +219,16 @@ function runSolvePnP() {
 
     // Send calibrated parameters to device
     const payload = {
-        pitch: parseFloat(pitch.toFixed(2)),
-        roll: parseFloat(roll.toFixed(2)),
-        yaw: parseFloat(yaw.toFixed(2)),
+        pitch: parseFloat(pitch),
+        roll: parseFloat(roll),
+        yaw: parseFloat(yaw),
         useHardcodedOrientation: true,
         
-        latitude: parseFloat(finalLat.toFixed(6)),
-        longitude: parseFloat(finalLon.toFixed(6)),
+        latitude: parseFloat(finalLat),
+        longitude: parseFloat(finalLon),
         useHardcodedPosition: true,
         
-        altitude: parseFloat(finalAlt.toFixed(2)), 
+        altitude: parseFloat(finalAlt), 
         useHardcodedAltitude: true
     };
 
