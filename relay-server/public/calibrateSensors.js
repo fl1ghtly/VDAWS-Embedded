@@ -14,6 +14,7 @@ function submitCalibration(e) {
     
     // Only add values if they were actually typed in
     if (getVal('seaLevelhPA') !== undefined) payload.seaLevelhPA = getVal('seaLevelhPA');
+    if (getVal('fov') !== undefined) payload.fov = getVal('fov');
     if (getVal('latitude') !== undefined) payload.latitude = getVal('latitude');
     if (getVal('longitude') !== undefined) payload.longitude = getVal('longitude');
     if (getVal('altitude') !== undefined) payload.altitude = getVal('altitude');

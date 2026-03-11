@@ -217,6 +217,10 @@ function runSolvePnP() {
     const finalLon = mathOrigin.lon + (dLonRad * (180 / Math.PI));
     const finalAlt = mathOrigin.alt + camZ;
 
+    // Calculate camera FOV in degrees from horizontal focal length
+    const imgWidth = document.getElementById('droneImage').naturalWidth || 320;
+    const fovDeg = 2 * Math.atan(imgWidth / (2 * fx)) * (180 / Math.PI);
+
     // Send calibrated parameters to device
     const payload = {
         pitch: parseFloat(pitch),
@@ -229,7 +233,9 @@ function runSolvePnP() {
         useHardcodedPosition: true,
         
         altitude: parseFloat(finalAlt), 
-        useHardcodedAltitude: true
+        useHardcodedAltitude: true,
+
+        fov: parseFloat(fovDeg)
     };
 
     fetch('/' + deviceId + '/calibrate', {

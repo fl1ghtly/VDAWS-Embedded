@@ -150,7 +150,7 @@ WebServer server(80);
 #define PCLK_GPIO_NUM    12    ///< Pixel clock input
 
 // OV7670 Camera FOV in degrees
-static const float FOV = 25;
+float FOV = 25;
 
 // ============================================================================
 // BMP280 BAROMETRIC SENSOR CONFIGURATION
@@ -339,6 +339,7 @@ String getSensors() {
 void applyCalibration(JsonDocument& doc) {
   // Apply environment calibration
   seaLevelhPA = doc["seaLevelhPA"] | seaLevelhPA;
+  FOV = doc["fov"] | FOV;
 
   // Apply position calibration
   hardcodeLatitude = doc["latitude"] | hardcodeLatitude;
@@ -353,9 +354,10 @@ void applyCalibration(JsonDocument& doc) {
   hardcodeYaw = doc["yaw"] | hardcodeYaw;
   useHardcodedOrientation = doc["useHardcodedOrientation"] | useHardcodedOrientation;
   useHardcodeYaw = doc["useHardcodeYaw"] | useHardcodeYaw;
-  
+
   // Save to flash
   preferences.putFloat("seaLevel", seaLevelhPA);
+  preferences.putFloat("fov", FOV);
   
   preferences.putBool("usePos", useHardcodedPosition);
   preferences.putBool("useAlt", useHardcodedPosition);
@@ -372,6 +374,7 @@ void applyCalibration(JsonDocument& doc) {
   // Log the new state
   Serial.println("--- New Calibration Applied ---");
   Serial.printf("Sea Level hPA: %.2f\n", seaLevelhPA);
+  Serial.printf("FOV (deg): %.2f", FOV);
   Serial.printf("Hardcoded Position: %s (Lat: %.6f, Lon: %.6f, Alt: %.2fm)\n", 
                 useHardcodedPosition ? "ON" : "OFF", hardcodeLatitude, hardcodeLongitude, hardcodeAltitude);
   Serial.printf("Use Hardcoded Alt Only: %s\n", useHardcodedAltitude ? "ON" : "OFF");
@@ -387,6 +390,7 @@ void clearPreferences() {
 
   // Reset the live RAM variables back to safe defaults
   seaLevelhPA = 1013.25;
+  FOV = 25;
   useHardcodedPosition = false;
   useHardcodedAltitude = false;
   hardcodeLatitude = 0.0;
