@@ -10,6 +10,8 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
 const devices = {};
+// Buffer to hold latest image from each device
+const latestImages = {};
 
 wss.on('connection', (ws) => {
     console.log('New device connected');
@@ -23,43 +25,33 @@ wss.on('connection', (ws) => {
                 ws.deviceId = deviceId;
                 console.log(`Device ${deviceId} registered.`);
             }
+        } else {
+            if (ws.deviceId) {
+                latestImages[ws.deviceId] = message;
+            }
         }
     });
 
     ws.on('close', () => {
-        if (ws.deviceId && devices[ws.deviceId]) {
+        if (ws.deviceId) {
             console.log(`Device ${ws.deviceId} disconnected.`);
             delete devices[ws.deviceId];
+            delete latestImages[ws.deviceId];
         }
     });
 });
 
 app.get('/:deviceId/capture', (req, res) => {
     const deviceId = req.params.deviceId;
-    const deviceSocket = devices[deviceId];
 
-    if (!deviceSocket || deviceSocket.readyState !== WebSocket.OPEN) {
-        return res.status(404).send(`Device ${deviceId} is offline.`);
+    // Instantly check the RAM cache for the latest pushed image
+    if (latestImages[deviceId]) {
+        res.set('Content-Type', 'image/jpeg');
+        return res.send(latestImages[deviceId]);
     }
-
-    deviceSocket.send("CAPTURE");
-
-    const onMessage = (message, isBinary) => {
-        if (isBinary) {
-            res.set('Content-Type', 'image/jpeg');
-            res.send(message);
-            deviceSocket.removeListener('message', onMessage);
-        }
-    };
-
-    deviceSocket.on('message', onMessage);
-
-    setTimeout(() => {
-        if (!res.headersSent) {
-            res.status(504).send("Camera capture timeout.");
-            deviceSocket.removeListener('message', onMessage);
-        }
-    }, 5000);
+    
+    // If no image is in the cache yet, return an error instantly
+    res.status(404).send(`No image available for ${deviceId} yet. It may still be booting.`);
 });
 
 app.get('/:deviceId/sensors', (req, res) => {

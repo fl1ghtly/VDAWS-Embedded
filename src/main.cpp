@@ -1461,6 +1461,20 @@ void loop() {
                    ESP.getFreeHeap(), ESP.getFreePsram());
   }
 
+  static unsigned long lastImagePushTime = 0;
+  const int imagePushTime = 200; // 5 Frames per second = 0.2 seconds per frame = 200 ms per frame
+  if (millis() - lastImagePushTime > imagePushTime) {
+    lastImagePushTime = millis();
+
+    uint8_t *jpg_buf = NULL;
+    size_t jpg_len = 0;
+        
+    if (getCapture(&jpg_buf, &jpg_len)) {
+      webSocket.sendBIN(jpg_buf, jpg_len);
+      free(jpg_buf); // Always free the buffer
+    }
+  }
+
   // ========================================================================
   // GPS DATA PROCESSING
   // ========================================================================
